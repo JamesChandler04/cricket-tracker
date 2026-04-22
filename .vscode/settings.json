@@ -1,6 +1,6 @@
 {
     "python.testing.pytestArgs": [
-        "test fixtures"
+        "test_fixtures"
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true
