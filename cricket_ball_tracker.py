@@ -4,14 +4,20 @@ import pandas as pd
 import math
 from datetime import datetime
 import os
-import typing as t
-if not t.TYPE_CHECKING:
+import typing
+import tkinter as tk
+from tkinter import ttk
+
+import checkers
+import drawers
+import display
+import calculators
+
+if not typing.TYPE_CHECKING:
     import xlsxwriter # Used when saving to excel
 
 class CricketBallTracker:
     def __init__(self):
-        self.video_path = None
-        self.video_path_side = None
         self.cap = None
         self.cap_side = None
         self.frame_positions = []  # (frame_number, x_px, y_px, time_s) for main view
@@ -44,114 +50,10 @@ class CricketBallTracker:
         self.main_rotation = 0  # 0, 90, 180, or 270 degrees
         self.side_rotation = 0  # 0, 90, 180, or 270 degrees
 
-    def transform_frame(self, frame, rotation):
-        """Apply rotation to a frame"""
-        if rotation == 90:
-            return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-        elif rotation == 180:
-            return cv2.rotate(frame, cv2.ROTATE_180)
-        elif rotation == 270:
-            return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        return frame
-
-    # ---------------------- Setup ---------------------- #
-    def load_main_video(self, video_path):
-        self.video_path = video_path
-        self.cap = cv2.VideoCapture(video_path)
-        if not self.cap.isOpened():
-            raise ValueError(f"Error: Could not open main video file {video_path}")
-
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(f"Main video loaded: {self.total_frames} frames")
-        print(f"Main resolution: {self.frame_width}x{self.frame_height}")
-
-        while True:
-            try:
-                self.fps = float(input("Enter the frame rate (FPS) of the video: ").strip())
-                if self.fps <= 0:
-                    raise ValueError
-                break
-            except ValueError:
-                print("Please enter a positive number for FPS.")
-
-    def load_side_video(self):
-        self.video_path_side = input("Enter the path to the side view video file: ").strip().strip('"')
-        if not self.video_path_side:
-            raise ValueError("No side view video path provided.")
-        self.cap_side = cv2.VideoCapture(self.video_path_side)
-        if not self.cap_side.isOpened():
-            raise ValueError(f"Error: Could not open side view video file {self.video_path_side}")
-
-        self.total_frames_side = int(self.cap_side.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.frame_width_side = int(self.cap_side.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.frame_height_side = int(self.cap_side.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(f"Side video loaded: {self.total_frames_side} frames")
-        print(f"Side resolution: {self.frame_width_side}x{self.frame_height_side}")
-
-    # ---------------------- Calibration ---------------------- #
-    def _calculate_meters_per_pixel(self):
-        if not self.calibrations or len(self.calibrations[-1][1]) != 2:
-            return
-        meters_per_pixel_values = []
-        for frame_num, points in self.calibrations:
-            (x1, y1), (x2, y2) = points
-            pixel_distance = math.hypot(x2 - x1, y2 - y1)
-            if pixel_distance < 1.0:
-                print(f"Error: Calibration points in frame {frame_num} are too close.")
-                self.calibrations.pop()
-                return
-            mpp = self.BALL_DIAMETER_M / pixel_distance
-            meters_per_pixel_values.append(mpp)
-            print(f"Main calibration in frame {frame_num}: 1 px = {mpp:.6f} m")
-        self.meters_per_pixel = sum(meters_per_pixel_values) / len(meters_per_pixel_values)
-        print(f"Main average meters per pixel: {self.meters_per_pixel:.6f} m")
-
-    def _calculate_side_focal_length(self, y_positions):
-        if not self.side_calibration or len(self.side_calibration[1]) != 2:
-            return
-        frame_num, points = self.side_calibration
-        (x1, z1), (x2, z2) = points
-        pixel_distance = math.hypot(x2 - x1, z2 - z1)
-        if pixel_distance < 1.0:
-            print(f"Error: Side calibration points in frame {frame_num} are too close.")
-            self.side_calibration = None
-            return
-        frame_idx = frame_num - self.side_frame_for_main_frame1 + 1
-        if frame_idx < 1 or frame_idx > len(y_positions):
-            print(f"Error: Side calibration frame {frame_num} has no corresponding Y-position.")
-            self.side_calibration = None
-            return
-        y_m = y_positions[frame_idx - 1]
-        if y_m <= 0:
-            print(f"Error: Invalid Y-position {y_m:.3f}m for side calibration frame {frame_num}.")
-            self.side_calibration = None
-            return
-        self.side_focal_length_px = pixel_distance * y_m / self.BALL_DIAMETER_M
-        print(f"Side calibration in frame {frame_num}: Focal length = {self.side_focal_length_px:.2f} px (y_m={y_m:.3f}m, d_px={pixel_distance:.2f}px)")
-
-    # ---------------------- Calibration Validation ---------------------- #
-    def _check_calibration_difference(self):
-        if len(self.calibrations) != 2:
-            return None, False
-        meters_per_pixel_values = []
-        for frame_num, points in self.calibrations:
-            (x1, y1), (x2, y2) = points
-            pixel_distance = math.hypot(x2 - x1, y2 - y1)
-            if pixel_distance < 1.0:
-                return None, False
-            mpp = self.BALL_DIAMETER_M / pixel_distance
-            meters_per_pixel_values.append(mpp)
-        mpp1, mpp2 = meters_per_pixel_values
-        avg_mpp = (mpp1 + mpp2) / 2
-        percent_diff = 100 * abs(mpp1 - mpp2) / avg_mpp if avg_mpp > 0 else 0
-        is_invalid = percent_diff >= 25.0
-        if is_invalid:
-            print(f"Invalid Main Calibration: Percentage difference {percent_diff:.2f}% exceeds 25% threshold")
-        else:
-            print(f"Main calibration valid: Percentage difference {percent_diff:.2f}%")
-        return percent_diff, is_invalid
+        self.drawers = drawers.Drawers()
+        self.display = display.Display()
+        self.calculators = calculators.Calculators()
+        self.checkers = checkers.Checker()
 
     # ---------------------- Mouse ---------------------- #
     def mouse_callback(self, event, x, y, flags, param):
@@ -162,7 +64,7 @@ class CricketBallTracker:
                 self.calibrations[-1][1].append((x, y))
                 print(f"Main diameter point added in frame {self.current_frame}: ({x}, {y})")
                 if len(self.calibrations[-1][1]) == 2:
-                    self._calculate_meters_per_pixel()
+                    self.calibrations, self.meters_per_pixel = self.calculators._calculate_meters_per_pixel(self.calibrations, self.BALL_DIAMETER_M, self.meters_per_pixel)
                     if len(self.calibrations) >= 2:
                         self.calibration_active = False
                         print("Main second calibration completed.")
@@ -179,7 +81,7 @@ class CricketBallTracker:
                 self.seam_points.append((x, y))
                 print(f"Seam point added: ({x}, {y})")
                 if len(self.seam_points) == 2:
-                    self._calculate_seam_angle()
+                    self.seam_measurements, self.seam_points = self.calculators._calculate_seam_angle(self.seam_points, self.seam_measurements, self.current_frame)
                     self.seam_angle_active = False
                     print(f"Seam angle tracking stopped for frame {self.current_frame}. Angle: {self.seam_measurements[-1][1]:.2f} degrees")
 
@@ -206,116 +108,6 @@ class CricketBallTracker:
                     print(f"Side view Frame 1 set to raw frame {self.side_frame_for_main_frame1}, corresponding to main view Frame 1")
                 self._add_or_replace_point_for_frame(self.current_frame, x, y, timestamp, is_side=True)
                 print(f"Side View - Frame {self.current_frame}: Ball at (x={x}, z={y}) - Time: {timestamp:.3f}s")
-
-    # ---------------------- Seam Angle Calculation ---------------------- #
-    def _calculate_seam_angle(self):
-        if len(self.seam_points) != 2:
-            return
-        (x1, y1), (x2, y2) = self.seam_points
-        dx = x2 - x1
-        dy = y2 - y1
-        angle = math.degrees(math.atan2(dx, -dy)) % 360
-        self.seam_measurements.append((self.current_frame, angle))
-        self.seam_points = []
-        print(f"Seam angle calculated for frame {self.current_frame}: {angle:.2f} degrees")
-
-    # ---------------------- Seam Wobble Check ---------------------- #
-    def _check_seam_wobble(self):
-        if not self.seam_measurements:
-            return None, False, 0.0
-        if len(self.seam_measurements) == 1:
-            return self.seam_measurements[0][1], False, 0.0
-
-        sorted_measurements = sorted(self.seam_measurements, key=lambda x: x[0])
-        angles = [m[1] for m in sorted_measurements]
-        avg_angle = sum(angles) / len(angles)
-        max_diff = 0.0
-
-        for i in range(1, len(angles)):
-            diff = abs(angles[i] - angles[i-1])
-            diff = min(diff, 180 - diff)
-            max_diff = max(max_diff, diff)
-            if diff > 10.0:
-                print(f"Wobble Seam detected: Angle difference {diff:.2f} degrees between frames {sorted_measurements[i-1][0]} and {sorted_measurements[i][0]}")
-                return "Wobble Seam", True, max_diff
-        return avg_angle, False, max_diff
-
-    # ---------------------- Initial Trajectory Calculation ---------------------- #
-    def _calculate_initial_trajectory(self):
-        if len(self.frame_positions) < 2:
-            return None
-        _, x1, y1, _ = self.frame_positions[0]
-        _, x2, y2, _ = self.frame_positions[1]
-        dx = (x2 - x1) * self.meters_per_pixel
-        dy = (self.frame_height - y2) - (self.frame_height - y1)
-        dy *= self.meters_per_pixel
-        angle = math.degrees(math.atan2(dx, -dy)) % 360
-        if angle > 180:
-            angle -= 180
-        return angle
-
-    # ---------------------- Navigation ---------------------- #
-    def advance_frame(self, is_side=False):
-        total = self.total_frames_side if is_side else self.total_frames
-        if self.current_frame < total - 1:
-            self.current_frame += 1
-
-    def previous_frame(self, is_side=False):
-        if self.current_frame > 0:
-            self.current_frame -= 1
-
-    # ---------------------- Drawing ---------------------- #
-    def draw_text(self, frame, text, position, font_scale=1.2, thickness=3):
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        x, y = position
-        cv2.putText(frame, text, (x + 2, y + 2), font, font_scale, (255, 255, 255), thickness + 2, cv2.LINE_AA)
-        cv2.putText(frame, text, (x, y), font, font_scale, (0, 0, 0), thickness, cv2.LINE_AA)
-
-    def draw_trajectory(self, frame, is_side=False):
-        positions = self.side_positions if is_side else self.frame_positions
-        height = self.frame_height_side if is_side else self.frame_height
-        marker_radius = 2 if is_side else 5  # Smaller marker for side view
-        if len(positions) > 1:
-            for i in range(1, len(positions)):
-                prev = positions[i - 1]
-                curr = positions[i]
-                cv2.line(frame, (prev[1], prev[2]), (curr[1], curr[2]), (0, 255, 0), 2)
-
-        for i, (frame_num, x, y, timestamp) in enumerate(positions):
-            color = (0, 0, 255) if frame_num == self.current_frame else (255, 0, 0)
-            cv2.circle(frame, (x, y), marker_radius, color, -1)
-            cv2.putText(frame, f"{i}", (x + 10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-
-        if not is_side:
-            if len(self.seam_points) >= 1:
-                for i, (x, y) in enumerate(self.seam_points):
-                    cv2.circle(frame, (x, y), 5, (255, 255, 0), -1)
-                    cv2.putText(frame, f"S{i+1}", (x + 10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-                if len(self.seam_points) == 2:
-                    cv2.line(frame, self.seam_points[0], self.seam_points[1], (255, 255, 0), 2)
-
-            current_seam_angle = None
-            for frame_num, angle in self.seam_measurements:
-                if frame_num == self.current_frame and len(self.seam_points) < 2:
-                    current_seam_angle = angle
-                    break
-            if current_seam_angle is not None and len(self.seam_points) < 2:
-                cv2.putText(frame, f"Seam Angle: {current_seam_angle:.2f}°",
-                            (self.frame_width // 2, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-
-            for i, (frame_num, points) in enumerate(self.calibrations):
-                for j, (x, y) in enumerate(points):
-                    cv2.circle(frame, (x, y), 5, (0, 255, 255), -1)
-                    cv2.putText(frame, f"D{i+1}{j+1}", (x + 10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                if len(points) == 2:
-                    cv2.line(frame, points[0], points[1], (0, 255, 255), 2)
-        else:
-            if self.side_calibration and len(self.side_calibration[1]) >= 1:
-                for j, (x, z) in enumerate(self.side_calibration[1]):
-                    cv2.circle(frame, (x, z), 5, (0, 255, 255), -1)
-                    cv2.putText(frame, f"D{j+1}", (x + 10, z - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                if len(self.side_calibration[1]) == 2:
-                    cv2.line(frame, self.side_calibration[1][0], self.side_calibration[1][1], (0, 255, 255), 2)
 
     # ---------------------- Data Helpers ---------------------- #
     def _add_or_replace_point_for_frame(self, frame_no, x, y, t, is_side=False):
@@ -388,7 +180,7 @@ class CricketBallTracker:
             return None
 
         # Initial trajectory angle (used for projected X only)
-        initial_trajectory = self._calculate_initial_trajectory()
+        initial_trajectory = self.calculators._calculate_initial_trajectory(self.frame_positions, self.frame_height, self.meters_per_pixel)
         if initial_trajectory is None:
             print("Cannot build 3D Data: Initial trajectory not available.")
             return None
@@ -462,7 +254,9 @@ class CricketBallTracker:
 
         # Calculate side view focal length (still used in Parameters)
         if self.side_calibration:
-            self._calculate_side_focal_length(y_positions)
+            self.side_calibration, tmp_side_focal_length_px = self.calculators._calculate_side_focal_length(y_positions, self.side_calibration, self.side_frame_for_main_frame1, self.BALL_DIAMETER_M, self.side_focal_length_px)
+            if tmp_side_focal_length_px is not None:
+                self.side_focal_length_px = tmp_side_focal_length_px
 
         # Side/back clicks mapping (we only use Z from old mapping for this sheet)
         x0_side, z0_side = None, None
@@ -685,9 +479,9 @@ class CricketBallTracker:
             return
 
         df_3d_data = self._build_3d_data()
-        initial_trajectory = self._calculate_initial_trajectory()
-        seam_angle, is_wobble, max_seam_diff = self._check_seam_wobble()
-        percent_diff, is_invalid_cal = self._check_calibration_difference()
+        initial_trajectory = self.calculators._calculate_initial_trajectory(self.frame_positions, self.frame_height, self.meters_per_pixel)
+        seam_angle, is_wobble, max_seam_diff = self.checkers._check_seam_wobble(self.seam_measurements)
+        percent_diff, is_invalid_cal = self.checkers._check_calibration_difference(self.calibrations, self.BALL_DIAMETER_M)
 
         # Seam Angles DataFrame
         seam_data = [[frame_num, f"{angle:.2f}"] for frame_num, angle in self.seam_measurements]
@@ -794,29 +588,127 @@ class CricketBallTracker:
 
                 # 3D Data (includes Side X px, x(m), Actual Data, Side Z px, plus Initial Path & Swing)
                 if df_3d_data is not None and not df_3d_data.empty:
-                    print("Saving 3D Data sheet with {} rows".format(len(df_3d_data)))
+                    print(f"Saving 3D Data sheet with {len(df_3d_data)} rows")
                     df_3d_data.to_excel(writer, sheet_name='3D Data', index=False)
 
                 if not seam_df.empty:
-                    print("Saving Seam Angles sheet with {} rows".format(len(seam_df)))
+                    print(f"Saving Seam Angles sheet with {len(seam_df)} rows")
                     seam_df.to_excel(writer, sheet_name='Seam Angles', index=False)
 
                 if not cal_df.empty:
-                    print("Saving Main Calibrations sheet with {} rows".format(len(cal_df)))
+                    print(f"Saving Main Calibrations sheet with {len(cal_df)} rows")
                     cal_df.to_excel(writer, sheet_name='Main Calibrations', index=False)
 
                 if not side_cal_df.empty:
-                    print("Saving Side Calibration sheet with {} rows".format(len(side_cal_df)))
+                    print(f"Saving Side Calibration sheet with {len(side_cal_df)} rows")
                     side_cal_df.to_excel(writer, sheet_name='Side Calibration', index=False)
 
             print(f"Tracking data saved to {full_path}")
         except Exception as e:
             print(f"Error saving file: {e}")
 
-    # ---------------------- Main Tracker ---------------------- #
-    def run_main_tracker(self, video_path):
+    # ---------------------- Display Excel ---------------------- #
+    def display_excel_window(self, excel_file_path):
+        """
+        Display the contents of an Excel file in an interactive GUI window.
+        Supports multiple sheets with tabs.
+        
+        Args:
+            excel_file_path (str): Path to the Excel file to display
+        """
         try:
-            self.load_main_video(video_path)
+            # Read all sheets from Excel file
+            excel_file = pd.ExcelFile(excel_file_path)
+            sheet_names = excel_file.sheet_names
+            
+            if not sheet_names:
+                print(f"Error: Excel file {excel_file_path} has no sheets.")
+                return
+            
+            # Create main window
+            root = tk.Tk()
+            root.title(f"Excel Data Viewer - {os.path.basename(excel_file_path)}")
+            root.geometry("1200x600")
+            
+            # Create notebook (tabbed interface)
+            notebook = ttk.Notebook(root)
+            notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # Create a tab for each sheet
+            for sheet_name in sheet_names:
+                # Read sheet data
+                df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
+                
+                # Create frame for this sheet
+                sheet_frame = ttk.Frame(notebook)
+                notebook.add(sheet_frame, text=sheet_name)
+                
+                # Create treeview for displaying data
+                tree = ttk.Treeview(sheet_frame)
+                
+                # Define columns
+                columns = tuple(df.columns)
+                tree["columns"] = columns
+                tree.column("#0", width=0, stretch=tk.NO)
+                
+                # Calculate column widths based on content
+                col_widths = {}
+                for col in columns:
+                    # Estimate width based on column name and content
+                    max_width = len(str(col)) * 8
+                    if not df.empty:
+                        for val in df[col].astype(str):
+                            max_width = max(max_width, len(str(val)) * 8)
+                    col_widths[col] = max(min(max_width, 200), 80)  # Min 80, Max 200
+                
+                # Setup column headings
+                for col in columns:
+                    tree.heading(col, text=col)
+                    tree.column(col, width=col_widths[col], anchor='center')
+                
+                # Add rows to treeview
+                for idx, row in df.iterrows():
+                    values = [row[col] for col in columns]
+                    # Format values for display
+                    display_values = []
+                    for val in values:
+                        if pd.isna(val):
+                            display_values.append("")
+                        elif isinstance(val, float):
+                            display_values.append(f"{val:.6f}" if val != int(val) else str(int(val)))
+                        else:
+                            display_values.append(str(val))
+                    tree.insert("", tk.END, values=display_values)
+                
+                # Add scrollbars
+                vsb = ttk.Scrollbar(sheet_frame, orient=tk.VERTICAL, command=tree.yview)
+                hsb = ttk.Scrollbar(sheet_frame, orient=tk.HORIZONTAL, command=tree.xview)
+                tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+                
+                # Grid layout for treeview and scrollbars
+                tree.grid(row=0, column=0, sticky='nsew')
+                vsb.grid(row=0, column=1, sticky='ns')
+                hsb.grid(row=1, column=0, sticky='ew')
+                
+                sheet_frame.grid_rowconfigure(0, weight=1)
+                sheet_frame.grid_columnconfigure(0, weight=1)
+            
+            # Add info label at bottom
+            info_text = f"File: {os.path.basename(excel_file_path)} | Sheets: {', '.join(sheet_names)}"
+            info_label = ttk.Label(root, text=info_text, relief=tk.SUNKEN)
+            info_label.pack(side=tk.BOTTOM, fill=tk.X)
+            
+            root.mainloop()
+            
+        except FileNotFoundError:
+            print(f"Error: Excel file not found at {excel_file_path}")
+        except Exception as e:
+            print(f"Error displaying Excel file: {e}")
+
+    # ---------------------- Main Tracker ---------------------- #
+    def run_main_tracker(self):
+        try:
+            self.cap, self.total_frames, self.frame_width, self.frame_height, self.fps = self.display.load_main_video()
         except ValueError as e:
             print(e)
             return False
@@ -843,8 +735,8 @@ class CricketBallTracker:
                 print("Frame read failed or end of main video.")
                 break
 
-            display_frame = self.transform_frame(frame.copy(), self.main_rotation)
-            self.draw_trajectory(display_frame, is_side=False)
+            display_frame = self.display.transform_frame(frame.copy(), self.main_rotation)
+            self.drawers.draw_main_trajectory(display_frame, self.frame_positions, self.current_frame, self.frame_width, self.seam_points, self.seam_measurements, self.calibrations)
 
             if self.calibration_active:
                 cal_num = len(self.calibrations) + 1 if not self.calibrations or len(self.calibrations[-1][1]) == 2 else len(self.calibrations)
@@ -857,15 +749,15 @@ class CricketBallTracker:
             else:
                 status = f"PAUSED - Press C for {'first' if not self.calibrations else 'second'} calibration, SPACE for ball, T for seam"
 
-            seam_angle, is_wobble, _ = self._check_seam_wobble()
+            seam_angle, is_wobble, _ = self.checkers._check_seam_wobble(self.seam_measurements)
             seam_display = "Wobble Seam" if is_wobble else f"{seam_angle:.2f}°" if seam_angle is not None else "Not set"
-            self.draw_text(display_frame, status, (10, 40), font_scale=1.1)
-            self.draw_text(display_frame, f"Frame: {self.current_frame}/{self.total_frames-1}", (10, 80), font_scale=0.9)
-            self.draw_text(display_frame, f"Main Points: {len(self.frame_positions)}", (10, 110), font_scale=0.9)
-            self.draw_text(display_frame, f"Seam Angle: {seam_display}", (10, 140), font_scale=0.9)
-            self.draw_text(display_frame, f"Deceleration: {'{:.3f} m/s^2'.format(self.deceleration) if self.deceleration is not None else 'Not set'}", (10, 170), font_scale=0.9)
-            self.draw_text(display_frame, f"Meters/Pixel: {'{:.6f} m/px'.format(self.meters_per_pixel) if self.meters_per_pixel is not None else 'Not set'}", (10, 200), font_scale=0.9)
-            self.draw_text(display_frame, "S = Proceed to Side View", (10, 230), font_scale=0.9)
+            self.drawers.draw_text(display_frame, status, (10, 40), font_scale=1.1)
+            self.drawers.draw_text(display_frame, f"Frame: {self.current_frame}/{self.total_frames-1}", (10, 80), font_scale=0.9)
+            self.drawers.draw_text(display_frame, f"Main Points: {len(self.frame_positions)}", (10, 110), font_scale=0.9)
+            self.drawers.draw_text(display_frame, f"Seam Angle: {seam_display}", (10, 140), font_scale=0.9)
+            self.drawers.draw_text(display_frame, f"Deceleration: {'{:.3f} m/s^2'.format(self.deceleration) if self.deceleration is not None else 'Not set'}", (10, 170), font_scale=0.9)
+            self.drawers.draw_text(display_frame, f"Meters/Pixel: {'{:.6f} m/px'.format(self.meters_per_pixel) if self.meters_per_pixel is not None else 'Not set'}", (10, 200), font_scale=0.9)
+            self.drawers.draw_text(display_frame, "S = Proceed to Side View", (10, 230), font_scale=0.9)
 
             cv2.imshow(self.window_name, display_frame)
             key = cv2.waitKey(10) & 0xFF
@@ -909,9 +801,11 @@ class CricketBallTracker:
                     else:
                         print("Seam angle tracking stopped.")
             elif key in (ord('a'), 81):
-                self.previous_frame()
+                print("advancing frame back")
+                self.current_frame = self.display.previous_frame(self.current_frame)
             elif key in (ord('d'), 83):
-                self.advance_frame()
+                print("advancing frame forward")
+                self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames)
             elif key == ord('s'):
                 if self.meters_per_pixel is None or len(self.calibrations) < 2:
                     print("Cannot proceed until main calibrations are complete.")
@@ -934,7 +828,7 @@ class CricketBallTracker:
     # ---------------------- Side Tracker ---------------------- #
     def run_side_tracker(self):
         try:
-            self.load_side_video()
+            self.cap_side, self.total_frames_side, self.frame_width_side, self.frame_height_side = self.display.load_side_video()
         except ValueError as e:
             print(e)
             return
@@ -963,8 +857,8 @@ class CricketBallTracker:
                 print("Frame read failed or end of side video.")
                 break
 
-            display_frame = self.transform_frame(frame.copy(), self.side_rotation)
-            self.draw_trajectory(display_frame, is_side=True)
+            display_frame = self.display.transform_frame(frame.copy(), self.side_rotation)
+            self.drawers.draw_side_trajectory(display_frame, self.side_positions, self.current_frame, self.side_calibration)
 
             if self.side_calibration_active:
                 points = len(self.side_calibration[1]) if self.side_calibration else 0
@@ -974,12 +868,12 @@ class CricketBallTracker:
             else:
                 status = "PAUSED - Press SPACE to track, C to calibrate after first point"
 
-            self.draw_text(display_frame, status, (10, 40), font_scale=1.1)
-            self.draw_text(display_frame, f"Frame: {self.current_frame}/{self.total_frames_side-1}", (10, 80), font_scale=0.9)
-            self.draw_text(display_frame, f"Side Points: {len(self.side_positions)}", (10, 110), font_scale=0.9)
-            self.draw_text(display_frame, f"Main Frame 1 = Side Frame {'Not set' if self.side_frame_for_main_frame1 is None else self.side_frame_for_main_frame1}", (10, 140), font_scale=0.9)
-            self.draw_text(display_frame, f"Focal Length: {'{:.2f} px'.format(self.side_focal_length_px) if self.side_focal_length_px is not None else 'Not set'}", (10, 170), font_scale=0.9)
-            self.draw_text(display_frame, "S = Save Excel", (10, 200), font_scale=0.9)
+            self.drawers.draw_text(display_frame, status, (10, 40), font_scale=1.1)
+            self.drawers.draw_text(display_frame, f"Frame: {self.current_frame}/{self.total_frames_side-1}", (10, 80), font_scale=0.9)
+            self.drawers.draw_text(display_frame, f"Side Points: {len(self.side_positions)}", (10, 110), font_scale=0.9)
+            self.drawers.draw_text(display_frame, f"Main Frame 1 = Side Frame {'Not set' if self.side_frame_for_main_frame1 is None else self.side_frame_for_main_frame1}", (10, 140), font_scale=0.9)
+            self.drawers.draw_text(display_frame, f"Focal Length: {'{:.2f} px'.format(self.side_focal_length_px) if self.side_focal_length_px is not None else 'Not set'}", (10, 170), font_scale=0.9)
+            self.drawers.draw_text(display_frame, "S = Save Excel", (10, 200), font_scale=0.9)
 
             cv2.imshow(self.window_name_side, display_frame)
             key = cv2.waitKey(10) & 0xFF
@@ -1006,9 +900,9 @@ class CricketBallTracker:
                 self.tracking_active = not self.tracking_active
                 print(f"{'Ball tracking started' if self.tracking_active else 'Ball tracking paused'}")
             elif key in (ord('a'), 81):
-                self.previous_frame(is_side=True)
+                self.current_frame = self.display.previous_frame(self.current_frame)
             elif key in (ord('d'), 83):
-                self.advance_frame(is_side=True)
+                self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames_side)
             elif key == ord('s'):
                 self.save_to_excel()
             elif key == ord('o'):  # 'o' for rotate
@@ -1025,17 +919,114 @@ class CricketBallTracker:
         cv2.destroyAllWindows()
 
     # ---------------------- Main Entry ---------------------- #
-    def run_tracker(self, video_path):
-        if self.run_main_tracker(video_path):
+    def run_tracker(self):
+        if self.run_main_tracker():
             self.run_side_tracker()
+
+def display_excel(excel_file_path):
+    """
+    Standalone function to display Excel file contents in an interactive GUI window.
+    Supports multiple sheets with tabs.
+    
+    Usage:
+        display_excel("path/to/your/file.xlsx")
+    
+    Args:
+        excel_file_path (str): Path to the Excel file to display
+    """
+    try:
+        # Read all sheets from Excel file
+        excel_file = pd.ExcelFile(excel_file_path)
+        sheet_names = excel_file.sheet_names
+        
+        if not sheet_names:
+            print(f"Error: Excel file {excel_file_path} has no sheets.")
+            return
+        
+        # Create main window
+        root = tk.Tk()
+        root.title(f"Excel Data Viewer - {os.path.basename(excel_file_path)}")
+        root.geometry("1200x600")
+        
+        # Create notebook (tabbed interface)
+        notebook = ttk.Notebook(root)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Create a tab for each sheet
+        for sheet_name in sheet_names:
+            # Read sheet data
+            df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
+            
+            # Create frame for this sheet
+            sheet_frame = ttk.Frame(notebook)
+            notebook.add(sheet_frame, text=sheet_name)
+            
+            # Create treeview for displaying data
+            tree = ttk.Treeview(sheet_frame)
+            
+            # Define columns
+            columns = tuple(df.columns)
+            tree["columns"] = columns
+            tree.column("#0", width=0, stretch=tk.NO)
+            
+            # Calculate column widths based on content
+            col_widths = {}
+            for col in columns:
+                # Estimate width based on column name and content
+                max_width = len(str(col)) * 8
+                if not df.empty:
+                    for val in df[col].astype(str):
+                        max_width = max(max_width, len(str(val)) * 8)
+                col_widths[col] = max(min(max_width, 200), 80)  # Min 80, Max 200
+            
+            # Setup column headings
+            for col in columns:
+                tree.heading(col, text=col)
+                tree.column(col, width=col_widths[col], anchor='center')
+            
+            # Add rows to treeview
+            for idx, row in df.iterrows():
+                values = [row[col] for col in columns]
+                # Format values for display
+                display_values = []
+                for val in values:
+                    if pd.isna(val):
+                        display_values.append("")
+                    elif isinstance(val, float):
+                        display_values.append(f"{val:.6f}" if val != int(val) else str(int(val)))
+                    else:
+                        display_values.append(str(val))
+                tree.insert("", tk.END, values=display_values)
+            
+            # Add scrollbars
+            vsb = ttk.Scrollbar(sheet_frame, orient=tk.VERTICAL, command=tree.yview)
+            hsb = ttk.Scrollbar(sheet_frame, orient=tk.HORIZONTAL, command=tree.xview)
+            tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+            
+            # Grid layout for treeview and scrollbars
+            tree.grid(row=0, column=0, sticky='nsew')
+            vsb.grid(row=0, column=1, sticky='ns')
+            hsb.grid(row=1, column=0, sticky='ew')
+            
+            sheet_frame.grid_rowconfigure(0, weight=1)
+            sheet_frame.grid_columnconfigure(0, weight=1)
+        
+        # Add info label at bottom
+        info_text = f"File: {os.path.basename(excel_file_path)} | Sheets: {', '.join(sheet_names)}"
+        info_label = ttk.Label(root, text=info_text, relief=tk.SUNKEN)
+        info_label.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        root.mainloop()
+        
+    except FileNotFoundError:
+        print(f"Error: Excel file not found at {excel_file_path}")
+    except Exception as e:
+        print(f"Error displaying Excel file: {e}")
 
 def main():
     tracker = CricketBallTracker()
-    video_path = input("Enter the path to your main cricket video file (bird's eye view): ").strip().strip('"')
-    if not video_path:
-        print("No main video path provided. Exiting.")
-        return
-    tracker.run_tracker(video_path)
+
+    tracker.run_tracker()
 
 if __name__ == "__main__":
     main()
