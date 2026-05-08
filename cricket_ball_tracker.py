@@ -7,11 +7,14 @@ import os
 import typing
 import tkinter as tk
 from tkinter import ttk
+import yaml
 
 import checkers
 import drawers
 import display
 import calculators
+import automations
+from helpers import Key
 
 if not typing.TYPE_CHECKING:
     import xlsxwriter # Used when saving to excel
@@ -22,7 +25,7 @@ class CricketBallTracker:
         self.cap_side = None
         self.frame_positions = []  # (frame_number, x_px, y_px, time_s) for main view
         self.side_positions = []   # (frame_number, x_px, z_px, time_s) for side view
-        self.current_frame = 0
+        self.current_frame = 253
         self.total_frames = 0
         self.total_frames_side = 0
         self.fps = 30.0
@@ -50,10 +53,16 @@ class CricketBallTracker:
         self.main_rotation = 0  # 0, 90, 180, or 270 degrees
         self.side_rotation = 0  # 0, 90, 180, or 270 degrees
 
+        self.background_frame_top = None
+
         self.drawers = drawers.Drawers()
         self.display = display.Display()
         self.calculators = calculators.Calculators()
         self.checkers = checkers.Checker()
+        self.ball_finder = automations.BallFinder()
+
+        with open("config.yml", "r") as f:
+            self.config_file = yaml.safe_load(f)
 
     # ---------------------- Mouse ---------------------- #
     def mouse_callback(self, event, x, y, flags, param):
@@ -510,7 +519,7 @@ class CricketBallTracker:
             cal_df = pd.concat([cal_df,
                                 pd.DataFrame([cal_summary], columns=["Frame Number", "Meters per Pixel"]),
                                 pd.DataFrame([cal_diff_row], columns=["Frame Number", "Meters per Pixel"])],
-                               ignore_index=True)
+                                ignore_index=True)
 
         # Side Calibration DataFrame
         side_cal_data = []
@@ -531,14 +540,19 @@ class CricketBallTracker:
                             side_cal_data.append([frame_num, f"{pixel_distance:.2f}", f"{y_m:.3f}", f"{f:.2f}"])
         side_cal_df = pd.DataFrame(side_cal_data, columns=["Frame Number", "Pixel Diameter", "Y-Position (m)", "Focal Length (px)"])
 
-        while True:
-            folder_path = input("Enter the folder path to save the Excel file (leave blank for current directory): ").strip().strip('"')
-            if not folder_path:
-                folder_path = os.getcwd()
-                break
-            if os.path.isdir(folder_path):
-                break
-            print("Invalid folder path. Please enter a valid directory or leave blank for current directory.")
+        if not self.config_file["output"]["folder"]:
+            while True:
+                folder_path = input("Enter the folder path to save the Excel file (leave blank for current directory): ").strip().strip('"')
+                if not folder_path:
+                    folder_path = os.getcwd()
+                    break
+                if os.path.isdir(folder_path):
+                    break
+                print("Invalid folder path. Please enter a valid directory or leave blank for current directory.")
+        else:
+            folder_path = self.config_file["output"]["folder"]
+            os.makedirs(folder_path, exist_ok=True)
+            print(f"Output folder configured to '{folder_path}'. All files will be saved in there.")
 
         filename = input("Enter Excel filename (without extension): ").strip()
         if not filename:
@@ -584,6 +598,7 @@ class CricketBallTracker:
                         final_swing_val
                     ]
                 })
+
                 param_df.to_excel(writer, sheet_name='Parameters', index=False)
 
                 # 3D Data (includes Side X px, x(m), Actual Data, Side Z px, plus Initial Path & Swing)
@@ -603,107 +618,9 @@ class CricketBallTracker:
                     print(f"Saving Side Calibration sheet with {len(side_cal_df)} rows")
                     side_cal_df.to_excel(writer, sheet_name='Side Calibration', index=False)
 
-            print(f"Tracking data saved to {full_path}")
+            print(f"Tracking data saved.")
         except Exception as e:
             print(f"Error saving file: {e}")
-
-    # ---------------------- Display Excel ---------------------- #
-    def display_excel_window(self, excel_file_path):
-        """
-        Display the contents of an Excel file in an interactive GUI window.
-        Supports multiple sheets with tabs.
-        
-        Args:
-            excel_file_path (str): Path to the Excel file to display
-        """
-        try:
-            # Read all sheets from Excel file
-            excel_file = pd.ExcelFile(excel_file_path)
-            sheet_names = excel_file.sheet_names
-            
-            if not sheet_names:
-                print(f"Error: Excel file {excel_file_path} has no sheets.")
-                return
-            
-            # Create main window
-            root = tk.Tk()
-            root.title(f"Excel Data Viewer - {os.path.basename(excel_file_path)}")
-            root.geometry("1200x600")
-            
-            # Create notebook (tabbed interface)
-            notebook = ttk.Notebook(root)
-            notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            
-            # Create a tab for each sheet
-            for sheet_name in sheet_names:
-                # Read sheet data
-                df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
-                
-                # Create frame for this sheet
-                sheet_frame = ttk.Frame(notebook)
-                notebook.add(sheet_frame, text=sheet_name)
-                
-                # Create treeview for displaying data
-                tree = ttk.Treeview(sheet_frame)
-                
-                # Define columns
-                columns = tuple(df.columns)
-                tree["columns"] = columns
-                tree.column("#0", width=0, stretch=tk.NO)
-                
-                # Calculate column widths based on content
-                col_widths = {}
-                for col in columns:
-                    # Estimate width based on column name and content
-                    max_width = len(str(col)) * 8
-                    if not df.empty:
-                        for val in df[col].astype(str):
-                            max_width = max(max_width, len(str(val)) * 8)
-                    col_widths[col] = max(min(max_width, 200), 80)  # Min 80, Max 200
-                
-                # Setup column headings
-                for col in columns:
-                    tree.heading(col, text=col)
-                    tree.column(col, width=col_widths[col], anchor='center')
-                
-                # Add rows to treeview
-                for idx, row in df.iterrows():
-                    values = [row[col] for col in columns]
-                    # Format values for display
-                    display_values = []
-                    for val in values:
-                        if pd.isna(val):
-                            display_values.append("")
-                        elif isinstance(val, float):
-                            display_values.append(f"{val:.6f}" if val != int(val) else str(int(val)))
-                        else:
-                            display_values.append(str(val))
-                    tree.insert("", tk.END, values=display_values)
-                
-                # Add scrollbars
-                vsb = ttk.Scrollbar(sheet_frame, orient=tk.VERTICAL, command=tree.yview)
-                hsb = ttk.Scrollbar(sheet_frame, orient=tk.HORIZONTAL, command=tree.xview)
-                tree.configure(yscroll=vsb.set, xscroll=hsb.set)
-                
-                # Grid layout for treeview and scrollbars
-                tree.grid(row=0, column=0, sticky='nsew')
-                vsb.grid(row=0, column=1, sticky='ns')
-                hsb.grid(row=1, column=0, sticky='ew')
-                
-                sheet_frame.grid_rowconfigure(0, weight=1)
-                sheet_frame.grid_columnconfigure(0, weight=1)
-            
-            # Add info label at bottom
-            info_text = f"File: {os.path.basename(excel_file_path)} | Sheets: {', '.join(sheet_names)}"
-            info_label = ttk.Label(root, text=info_text, relief=tk.SUNKEN)
-            info_label.pack(side=tk.BOTTOM, fill=tk.X)
-            
-            root.mainloop()
-            
-        except FileNotFoundError:
-            print(f"Error: Excel file not found at {excel_file_path}")
-        except Exception as e:
-            print(f"Error displaying Excel file: {e}")
 
     # ---------------------- Main Tracker ---------------------- #
     def run_main_tracker(self):
@@ -723,6 +640,8 @@ class CricketBallTracker:
         print("- T: Start/Stop Seam Angle Tracking Mode (after both calibrations)")
         print("- A/D or ←/→: Move frame back/forward")
         print("- Click: Mark calibration points, ball position, or seam points")
+        print("- F: Find ball in current frame")
+        print("- B: Set current frame to background frame (for ball finding)")
         print("- S: Proceed to side view tracking")
         print("- R: Reset tracking and calibration")
         print("- Q or ESC: Quit")
@@ -760,66 +679,87 @@ class CricketBallTracker:
             self.drawers.draw_text(display_frame, "S = Proceed to Side View", (10, 230), font_scale=0.9)
 
             cv2.imshow(self.window_name, display_frame)
-            key = cv2.waitKey(10) & 0xFF
+            key_code = int(cv2.waitKey(10) & 0xFF)
+            try:
+                key = Key(key_code)
+            except ValueError:
+                key = None
 
-            if key in (ord('q'), 27):
-                self.cap.release()
-                cv2.destroyAllWindows()
-                return False
-            elif key == ord('c'):
-                if self.tracking_active or self.seam_angle_active:
-                    print("Cannot start calibration while tracking or seam angle mode is active.")
-                elif len(self.calibrations) >= 2:
-                    print("Main calibrations already completed.")
-                else:
-                    self.calibration_active = not self.calibration_active
-                    if self.calibration_active:
-                        if not self.calibrations or len(self.calibrations[-1][1]) == 2:
-                            print(f"Starting {'first' if not self.calibrations else 'second'} main calibration.")
-                        else:
-                            print(f"Continuing {'first' if len(self.calibrations) == 1 else 'second'} main calibration.")
-                    else:
-                        print("Main calibration paused.")
-            elif key == ord(' '):
-                if self.meters_per_pixel is None or len(self.calibrations) < 2:
-                    print("Cannot start ball tracking until main calibrations are complete.")
-                elif self.seam_angle_active or self.calibration_active:
-                    print("Cannot start ball tracking while seam angle or calibration mode is active.")
-                else:
-                    self.tracking_active = not self.tracking_active
-                    print(f"{'Ball tracking started' if self.tracking_active else 'Ball tracking paused'}")
-            elif key == ord('t'):
-                if self.meters_per_pixel is None or len(self.calibrations) < 2:
-                    print("Cannot start seam angle tracking until main calibrations are complete.")
-                elif self.tracking_active or self.calibration_active:
-                    print("Cannot start seam angle tracking while ball tracking or calibration mode is active.")
-                else:
-                    self.seam_angle_active = not self.seam_angle_active
-                    if self.seam_angle_active:
-                        self.seam_points = []
-                        print("Seam angle tracking started.")
-                    else:
-                        print("Seam angle tracking stopped.")
-            elif key in (ord('a'), 81):
-                print("advancing frame back")
-                self.current_frame = self.display.previous_frame(self.current_frame)
-            elif key in (ord('d'), 83):
-                print("advancing frame forward")
-                self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames)
-            elif key == ord('s'):
-                if self.meters_per_pixel is None or len(self.calibrations) < 2:
-                    print("Cannot proceed until main calibrations are complete.")
-                elif not self.frame_positions:
-                    print("Cannot proceed without tracking at least one point.")
-                else:
+            match key:
+                case Key.q | Key.esc:
                     self.cap.release()
                     cv2.destroyAllWindows()
-                    return True
-            elif key == ord('o'):  # 'o' for rotate
-                self.main_rotation = (self.main_rotation + 90) % 360
-                print(f"Main view rotated to {self.main_rotation} degrees")
-            elif key == ord('r'):
-                self.reset()
+                    return False
+                case Key.c:
+                    if self.tracking_active or self.seam_angle_active:
+                        print("Cannot start calibration while tracking or seam angle mode is active.")
+                    elif len(self.calibrations) >= 2:
+                        print("Main calibrations already completed.")
+                    else:
+                        self.calibration_active = not self.calibration_active
+                        if self.calibration_active:
+                            if not self.calibrations or len(self.calibrations[-1][1]) == 2:
+                                print(f"Starting {'first' if not self.calibrations else 'second'} main calibration.")
+                            else:
+                                print(f"Continuing {'first' if len(self.calibrations) == 1 else 'second'} main calibration.")
+                        else:
+                            print("Main calibration paused.")
+                case Key.space:
+                    if self.meters_per_pixel is None or len(self.calibrations) < 2:
+                        print("Cannot start ball tracking until main calibrations are complete.")
+                    elif self.seam_angle_active or self.calibration_active:
+                        print("Cannot start ball tracking while seam angle or calibration mode is active.")
+                    else:
+                        self.tracking_active = not self.tracking_active
+                        print(f"{'Ball tracking started' if self.tracking_active else 'Ball tracking paused'}")
+                case Key.t:
+                    if self.meters_per_pixel is None or len(self.calibrations) < 2:
+                        print("Cannot start seam angle tracking until main calibrations are complete.")
+                    elif self.tracking_active or self.calibration_active:
+                        print("Cannot start seam angle tracking while ball tracking or calibration mode is active.")
+                    else:
+                        self.seam_angle_active = not self.seam_angle_active
+                        if self.seam_angle_active:
+                            self.seam_points = []
+                            print("Seam angle tracking started.")
+                        else:
+                            print("Seam angle tracking stopped.")
+                case Key.a:
+                    self.current_frame = self.display.previous_frame(self.current_frame, 1)
+                case Key.d:
+                    self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames, 1)
+                case Key.A:
+                    self.current_frame = self.display.previous_frame(self.current_frame, 10)
+                case Key.D:
+                    self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames, 10)
+                case Key.f:
+                    if self.background_frame_top is None:
+                        print("Set a background frame first by pressing 'B' on a clear frame.")
+                    else:
+                        cv2.imwrite("current_frame.jpg", frame)
+                        ball_data = self.ball_finder.find_ball(frame, self.background_frame_top)
+                        if ball_data is not None:
+                            print(f"Ball found: {ball_data}")
+                        else:
+                            print("No ball found")
+                case Key.b:
+                    self.background_frame_top = frame.copy()
+                    cv2.imwrite("background_frame.jpg", self.background_frame_top)
+                    print("Background frame set for ball finding.")
+                case Key.s:
+                    if self.meters_per_pixel is None or len(self.calibrations) < 2:
+                        print("Cannot proceed until main calibrations are complete.")
+                    elif not self.frame_positions:
+                        print("Cannot proceed without tracking at least one point.")
+                    else:
+                        self.cap.release()
+                        cv2.destroyAllWindows()
+                        return True
+                case Key.o:
+                    self.main_rotation = (self.main_rotation + 90) % 360
+                    print(f"Main view rotated to {self.main_rotation} degrees")
+                case Key.r:
+                    self.reset()
 
         self.cap.release()
         cv2.destroyAllWindows()
@@ -843,7 +783,7 @@ class CricketBallTracker:
         print("Controls:")
         print("- C: Start/Stop Calibration Mode (click two points across ball diameter in first tracked frame)")
         print("- SPACE: Start/Stop Ball Tracking Mode")
-        print("- A/D or ←/→: Move frame back/forward")
+        print("- a/d or A/D: Move frame back/forward (capitals for 10 frame jumps)")
         print("- Click: Mark calibration points or ball position (X, Z)")
         print("- S: Save data to Excel")
         print("- R: Reset side view tracking and calibration")
@@ -876,44 +816,53 @@ class CricketBallTracker:
             self.drawers.draw_text(display_frame, "S = Save Excel", (10, 200), font_scale=0.9)
 
             cv2.imshow(self.window_name_side, display_frame)
-            key = cv2.waitKey(10) & 0xFF
+            key_code = int(cv2.waitKey(10) & 0xFF)
+            try:
+                key = Key(key_code)
+            except ValueError:
+                key = None
 
-            if key in (ord('q'), 27):
-                break
-            elif key == ord('c'):
-                if self.side_frame_for_main_frame1 is None:
-                    print("Error: Track the first ball position before calibrating.")
-                elif self.current_frame != self.side_frame_for_main_frame1:
-                    print(f"Error: Side calibration must occur in first tracked frame ({self.side_frame_for_main_frame1}).")
-                elif self.side_calibration and len(self.side_calibration[1]) == 2:
-                    print("Side calibration already completed.")
-                else:
-                    self.side_calibration_active = not self.side_calibration_active
-                    if self.side_calibration_active:
-                        if self.side_calibration is None or len(self.side_calibration[1]) == 2:
-                            print(f"Starting side calibration in frame {self.side_frame_for_main_frame1}.")
-                        else:
-                            print("Continuing side calibration.")
+            match key:
+                case Key.q | Key.esc:
+                    break
+                case Key.c:
+                    if self.side_frame_for_main_frame1 is None:
+                        print("Error: Track the first ball position before calibrating.")
+                    elif self.current_frame != self.side_frame_for_main_frame1:
+                        print(f"Error: Side calibration must occur in first tracked frame ({self.side_frame_for_main_frame1}).")
+                    elif self.side_calibration and len(self.side_calibration[1]) == 2:
+                        print("Side calibration already completed.")
                     else:
-                        print("Side calibration paused.")
-            elif key == ord(' '):
-                self.tracking_active = not self.tracking_active
-                print(f"{'Ball tracking started' if self.tracking_active else 'Ball tracking paused'}")
-            elif key in (ord('a'), 81):
-                self.current_frame = self.display.previous_frame(self.current_frame)
-            elif key in (ord('d'), 83):
-                self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames_side)
-            elif key == ord('s'):
-                self.save_to_excel()
-            elif key == ord('o'):  # 'o' for rotate
-                self.side_rotation = (self.side_rotation + 90) % 360
-                print(f"Side view rotated to {self.side_rotation} degrees")
-            elif key == ord('r'):
-                self.side_positions = []
-                self.side_calibration = None
-                self.side_focal_length_px = None
-                self.side_frame_for_main_frame1 = None
-                print("Side view tracking, calibration, and frame mapping reset.")
+                        self.side_calibration_active = not self.side_calibration_active
+                        if self.side_calibration_active:
+                            if self.side_calibration is None or len(self.side_calibration[1]) == 2:
+                                print(f"Starting side calibration in frame {self.side_frame_for_main_frame1}.")
+                            else:
+                                print("Continuing side calibration.")
+                        else:
+                            print("Side calibration paused.")
+                case Key.space:
+                    self.tracking_active = not self.tracking_active
+                    print(f"{'Ball tracking started' if self.tracking_active else 'Ball tracking paused'}")
+                case Key.a:
+                    self.current_frame = self.display.previous_frame(self.current_frame, 1)
+                case Key.d:
+                    self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames_side, 1)
+                case Key.A:
+                    self.current_frame = self.display.previous_frame(self.current_frame, 10)
+                case Key.D:
+                    self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames_side, 10)
+                case Key.s:
+                    self.save_to_excel()
+                case Key.o:
+                    self.side_rotation = (self.side_rotation + 90) % 360
+                    print(f"Side view rotated to {self.side_rotation} degrees")
+                case Key.r:
+                    self.side_positions = []
+                    self.side_calibration = None
+                    self.side_focal_length_px = None
+                    self.side_frame_for_main_frame1 = None
+                    print("Side view tracking, calibration, and frame mapping reset.")
 
         self.cap_side.release()
         cv2.destroyAllWindows()

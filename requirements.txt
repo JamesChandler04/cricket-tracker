@@ -6,3 +6,6 @@ xlsxwriter
 mypy
 openpyxl
 pytest
+types-PyYAML
+pyqt5
+PyYAML

@@ -11,15 +11,19 @@ class Display:
             return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
         return frame
     
-    def advance_frame(self, current_frame, total_frames):
-        if current_frame < total_frames - 1:
-            current_frame += 1
-        
+    def advance_frame(self, current_frame, total_frames, frames_to_skip):
+        print(current_frame, total_frames, frames_to_skip)
+        if current_frame < total_frames - frames_to_skip:
+            current_frame += frames_to_skip
+        else:
+            current_frame = total_frames - 1
         return current_frame
 
-    def previous_frame(self, current_frame):
-        if current_frame > 0:
-            current_frame -= 1
+    def previous_frame(self, current_frame, frames_to_skip):
+        if current_frame > frames_to_skip:
+            current_frame -= frames_to_skip
+        else:
+            current_frame = 0
         return current_frame
 
     def load_main_video(self):
