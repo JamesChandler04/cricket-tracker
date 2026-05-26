@@ -139,9 +139,9 @@ class BallFinder:
 
 
 
-tester = BallFinder()
+# tester = BallFinder()
 
-curr_frame = cv2.imread("current_frame.jpg")
-background_frame = cv2.imread("background_frame.jpg")
+# curr_frame = cv2.imread("current_frame.jpg")
+# background_frame = cv2.imread("background_frame.jpg")
 
-print(tester.find_ball(curr_frame, background_frame))
+# print(tester.find_ball(curr_frame, background_frame))
