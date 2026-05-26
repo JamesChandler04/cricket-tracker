@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import os
+import math
 from typing import Optional
 from helpers import BallData, Coord
 
@@ -21,10 +23,16 @@ class BallFinder:
         grey = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
         background_grey = cv2.cvtColor(blurred_bg, cv2.COLOR_BGR2GRAY)
 
-        diff_grey = cv2.absdiff(grey, background_grey)
-        _, motion_mask = cv2.threshold(diff_grey, 25, 255, cv2.THRESH_BINARY)
-
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+        background_hsv = cv2.cvtColor(blurred_bg, cv2.COLOR_BGR2HSV)
+
+        diff_v = cv2.absdiff(hsv[:, :, 2], background_hsv[:, :, 2])
+        _, motion_mask = cv2.threshold(diff_v, 15, 255, cv2.THRESH_BINARY)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        motion_mask = cv2.morphologyEx(motion_mask, cv2.MORPH_CLOSE, kernel, iterations=3)
+        motion_mask = cv2.dilate(motion_mask, kernel, iterations=2)
+
         lower_red1 = np.array([0, 140, 100])
         upper_red1 = np.array([8, 255, 255])
         lower_red2 = np.array([172, 140, 100])
@@ -39,7 +47,6 @@ class BallFinder:
         h, w = frame.shape[:2]
         combined_mask[int(h * 0.75):, :] = 0
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
@@ -124,9 +131,24 @@ class BallFinder:
 
         centre_x, centre_y, radius = int(round(centre_x)), int(round(centre_y)), int(round(radius))
 
+        original_frame = frame.copy()
         cv2.circle(frame, (centre_x, centre_y), radius, (0, 255, 0), 2)
         cv2.circle(frame, (centre_x, centre_y), 2, (0, 0, 255), 3)
         cv2.imwrite(f"{tracking_folder}/detected_ball.jpg", frame)
+
+        os.makedirs(tracking_folder, exist_ok=True)
+        margin = int(radius * 0.25)
+        x0 = max(0, centre_x - radius - margin)
+        y0 = max(0, centre_y - radius - margin)
+        x1 = min(original_frame.shape[1], centre_x + radius + margin)
+        y1 = min(original_frame.shape[0], centre_y + radius + margin)
+        cropped_ball = original_frame[y0:y1, x0:x1].copy()
+
+        mask = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
+        cv2.circle(mask, (centre_x - x0, centre_y - y0), radius, 255, -1)
+        cropped_ball[mask == 0] = 0
+
+        cv2.imwrite(f"{tracking_folder}/cropped_ball.jpg", cropped_ball)
 
         return BallData(
             top_left=Coord(centre_x - radius, centre_y - radius),
@@ -137,11 +159,152 @@ class BallFinder:
             seam_angle=-1.0
         )
 
+    def find_seam(self, ball_data: BallData, frame) -> Optional[BallData]:
+        if frame is None or ball_data is None:
+            return None
+
+        x0 = max(0, ball_data.top_left.x)
+        y0 = max(0, ball_data.top_left.y)
+        x1 = min(frame.shape[1], ball_data.bottom_right.x)
+        y1 = min(frame.shape[0], ball_data.bottom_right.y)
+
+        if x1 <= x0 or y1 <= y0:
+            return None
+
+        roi = frame[y0:y1, x0:x1]
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+
+        # White seam mask: bright pixels with low saturation
+        # Widened ranges to capture fainter / slightly off-white seams
+        lower_white = np.array([0, 0, 140])   # allow slightly darker/brighter range
+        upper_white = np.array([180, 160, 255])
+        white_mask = cv2.inRange(hsv, lower_white, upper_white)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        os.makedirs(tracking_folder, exist_ok=True)
+        cv2.imwrite(f"{tracking_folder}/seam_white_mask.jpg", white_mask)
+
+        edges = cv2.Canny(white_mask, 50, 150)
+        lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi / 180, threshold=20, minLineLength=15, maxLineGap=8)
+
+        if lines is None:
+            return None
+
+        best_line = None
+        best_length = 0
+        for x_start, y_start, x_end, y_end in lines.reshape(-1, 4):
+            length = np.hypot(x_end - x_start, y_end - y_start)
+            if length > best_length:
+                best_length = length
+                best_line = (x_start, y_start, x_end, y_end)
+
+        if best_line is None:
+            return None
+
+        x_start, y_start, x_end, y_end = best_line
+
+        # Compute seam angle from the found line (ROI coordinates)
+        seam_angle = math.degrees(math.atan2(y_end - y_start, x_end - x_start))
+
+        # Determine circle centre and radius in full-image coordinates
+        try:
+            centre_full = ball_data.centre
+            radius_full = int((ball_data.bottom_right.x - ball_data.top_left.x) / 2)
+        except Exception:
+            # Fallback: estimate from bounding box
+            centre_full = Coord(x=(x0 + x1) // 2, y=(y0 + y1) // 2)
+            radius_full = int(min((x1 - x0), (y1 - y0)) / 2)
+
+        # Convert circle centre to ROI coordinates
+        cx = centre_full.x - x0
+        cy = centre_full.y - y0
+        r = radius_full
+
+        # Parametric line: p(t) = p1 + t*(d), p1=(x_start,y_start), d=(dx,dy)
+        dx = x_end - x_start
+        dy = y_end - y_start
+        a = dx * dx + dy * dy
+        b = 2 * (dx * (x_start - cx) + dy * (y_start - cy))
+        c = (x_start - cx) ** 2 + (y_start - cy) ** 2 - r * r
+
+        seam_full_start = None
+        seam_full_end = None
+
+        disc = b * b - 4 * a * c
+        if a != 0 and disc >= 0:
+            sqrt_disc = math.sqrt(disc)
+            t1 = (-b + sqrt_disc) / (2 * a)
+            t2 = (-b - sqrt_disc) / (2 * a)
+
+            p1x = x_start + t1 * dx
+            p1y = y_start + t1 * dy
+            p2x = x_start + t2 * dx
+            p2y = y_start + t2 * dy
+
+            # Map to full-image coords
+            seam_full_pt1 = (int(round(x0 + p1x)), int(round(y0 + p1y)))
+            seam_full_pt2 = (int(round(x0 + p2x)), int(round(y0 + p2y)))
+
+            # Assign seam endpoints across the ball (both intersection points)
+            seam_full_start = Coord(x=seam_full_pt1[0], y=seam_full_pt1[1])
+            seam_full_end = Coord(x=seam_full_pt2[0], y=seam_full_pt2[1])
+
+        # If intersections not found fall back to original short line (map to full coords)
+        if seam_full_start is None or seam_full_end is None:
+            seam_full_start = Coord(x=x0 + x_start, y=y0 + y_start)
+            seam_full_end = Coord(x=x0 + x_end, y=y0 + y_end)
+
+        ball_data.seam_start = seam_full_start
+        ball_data.seam_end = seam_full_end
+        ball_data.seam_angle = seam_angle
+        # --- Save images: cropped (masked) with seam line, and full image with circle+seam ---
+        try:
+            os.makedirs(tracking_folder, exist_ok=True)
+
+            # Cropped masked image (outside circle black) with seam line
+            cropped = roi.copy()
+            # compute radius from bounding box
+            try:
+                centre = ball_data.centre
+                radius = int((ball_data.bottom_right.x - ball_data.top_left.x) / 2)
+            except Exception:
+                centre = centre_full
+                radius = radius_full
+
+            mask = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
+            cv2.circle(mask, (centre.x - x0, centre.y - y0), radius, 255, -1)
+            cropped_masked = cropped.copy()
+            cropped_masked[mask == 0] = 0
+            # draw the extended seam on the cropped masked image (map full-image seam pts back to ROI coords)
+            s1 = (int(ball_data.seam_start.x - x0), int(ball_data.seam_start.y - y0))
+            s2 = (int(ball_data.seam_end.x - x0), int(ball_data.seam_end.y - y0))
+            cv2.line(cropped_masked, s1, s2, (0, 255, 255), 2)
+            cv2.imwrite(f"{tracking_folder}/cropped_ball_with_seam.jpg", cropped_masked)
+
+            # Full image with detected circle and seam
+            full_with_seam = frame.copy()
+            # draw circle (use computed centre/radius)
+            cv2.circle(full_with_seam, (centre.x, centre.y), radius, (0, 255, 0), 2)
+            # draw seam on full image (yellow)
+            cv2.line(full_with_seam, (ball_data.seam_start.x, ball_data.seam_start.y), (ball_data.seam_end.x, ball_data.seam_end.y), (0, 255, 255), 2)
+            cv2.imwrite(f"{tracking_folder}/detected_ball_with_seam.jpg", full_with_seam)
+        except Exception:
+            pass
+
+        return ball_data
 
 
-# tester = BallFinder()
 
-# curr_frame = cv2.imread("current_frame.jpg")
-# background_frame = cv2.imread("background_frame.jpg")
+tester = BallFinder()
 
-# print(tester.find_ball(curr_frame, background_frame))
+curr_frame = cv2.imread("current_frame.jpg")
+background_frame = cv2.imread("background_frame.jpg")
+
+ball_data = tester.find_ball(curr_frame, background_frame)
+if ball_data:
+    print(tester.find_seam(ball_data, curr_frame))
+else:
+    print("No ball found.")
