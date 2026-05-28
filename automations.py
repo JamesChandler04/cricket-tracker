@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import os
 import math
+import time
 from typing import Optional
 from helpers import BallData, Coord, Video
 
@@ -12,16 +13,19 @@ TOP_DOWN_BALL_RADIUS = 90
 class TopDownBallFinder:
 
     def get_ball_data(self, video: Video) -> Optional[BallData]:
-
-        for frame_idx in range(video.total_frames - 1):
+        video.change_frame(245)
+        for _ in range(video.total_frames - 1):
+            st = time.time()
             background_frame = video.get_current_frame()
-            curr_frame = video.change_frame(1)
+            video.change_frame(1)
             current_frame = video.get_current_frame()
 
             ball_data = self.find_ball(current_frame, background_frame)
             if ball_data:
-                ball_data = self.find_seam(ball_data, curr_frame)
-                return ball_data
+                cv2.imwrite(f"ball_in_frame/frame_{video.current_frame:04d}.jpg", current_frame)
+                ball_data = self.find_seam(ball_data, current_frame)
+            et = time.time()
+            print(f"Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
         return ball_data
 
     def find_ball(self, frame, background_frame) -> Optional[BallData]:
@@ -313,11 +317,16 @@ class TopDownBallFinder:
         return ball_data
 
 class SideOnBallFinder:
-    def find_ball(self, frame, background_frame) -> Optional[BallData]:
+    def find_ball(self, video: Video) -> Optional[BallData]:
         return None
 
 tester = TopDownBallFinder()
 
 top_down_video = Video("13.mp4")
+
+# curr_frame = cv2.imread("current_frame.jpg")
+# bg_frame = cv2.imread("background_frame.jpg")
+
+# print(tester.find_ball(curr_frame, bg_frame))
 
 print(tester.get_ball_data(top_down_video))
