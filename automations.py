@@ -3,13 +3,27 @@ import numpy as np
 import os
 import math
 from typing import Optional
-from helpers import BallData, Coord
+from helpers import BallData, Coord, Video
 
 tracking_folder = "tracking_output"
 
-AVERAGE_BALL_RADIUS = 90
+TOP_DOWN_BALL_RADIUS = 90
 
-class BallFinder:
+class TopDownBallFinder:
+
+    def get_ball_data(self, video: Video) -> Optional[BallData]:
+
+        for frame_idx in range(video.total_frames - 1):
+            background_frame = video.get_current_frame()
+            curr_frame = video.change_frame(1)
+            current_frame = video.get_current_frame()
+
+            ball_data = self.find_ball(current_frame, background_frame)
+            if ball_data:
+                ball_data = self.find_seam(ball_data, curr_frame)
+                return ball_data
+        return ball_data
+
     def find_ball(self, frame, background_frame) -> Optional[BallData]:
         if frame is None or background_frame is None:
             return None
@@ -84,7 +98,7 @@ class BallFinder:
                 if overlap_ratio < 0.25:
                     continue
 
-                score = overlap_ratio - abs(radius - AVERAGE_BALL_RADIUS) / 90.0
+                score = overlap_ratio - abs(radius - TOP_DOWN_BALL_RADIUS) / 90.0
                 if best_circle is None or score > best_circle[3]:
                     best_circle = (x, y, radius, score)
 
@@ -119,7 +133,7 @@ class BallFinder:
                 if fill_ratio < 0.55:
                     continue
 
-                score = fill_ratio + circularity * 1.5 - abs(radius - AVERAGE_BALL_RADIUS) / 70.0
+                score = fill_ratio + circularity * 1.5 - abs(radius - TOP_DOWN_BALL_RADIUS) / 70.0
                 candidates.append((cnt, x, y, radius, score))
 
             if not candidates:
@@ -191,7 +205,8 @@ class BallFinder:
         lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi / 180, threshold=20, minLineLength=15, maxLineGap=8)
 
         if lines is None:
-            return None
+            ball_data.seam_angle = -1.0
+            return ball_data
 
         best_line = None
         best_length = 0
@@ -202,7 +217,8 @@ class BallFinder:
                 best_line = (x_start, y_start, x_end, y_end)
 
         if best_line is None:
-            return None
+            ball_data.seam_angle = -1.0
+            return ball_data
 
         x_start, y_start, x_end, y_end = best_line
 
@@ -296,15 +312,12 @@ class BallFinder:
 
         return ball_data
 
+class SideOnBallFinder:
+    def find_ball(self, frame, background_frame) -> Optional[BallData]:
+        return None
 
+tester = TopDownBallFinder()
 
-tester = BallFinder()
+top_down_video = Video("13.mp4")
 
-curr_frame = cv2.imread("current_frame.jpg")
-background_frame = cv2.imread("background_frame.jpg")
-
-ball_data = tester.find_ball(curr_frame, background_frame)
-if ball_data:
-    print(tester.find_seam(ball_data, curr_frame))
-else:
-    print("No ball found.")
+print(tester.get_ball_data(top_down_video))

@@ -14,25 +14,15 @@ import drawers
 import display
 import calculators
 import automations
-from helpers import Key
+from helpers import Key, Video
 
 if not typing.TYPE_CHECKING:
     import xlsxwriter # Used when saving to excel
 
 class CricketBallTracker:
     def __init__(self):
-        self.cap = None
-        self.cap_side = None
         self.frame_positions = []  # (frame_number, x_px, y_px, time_s) for main view
         self.side_positions = []   # (frame_number, x_px, z_px, time_s) for side view
-        self.current_frame = 253
-        self.total_frames = 0
-        self.total_frames_side = 0
-        self.fps = 30.0
-        self.frame_width = 0
-        self.frame_height = 0
-        self.frame_width_side = 0
-        self.frame_height_side = 0
         self.meters_per_pixel = None
         self.side_focal_length_px = None
         self.tracking_active = False
@@ -50,8 +40,6 @@ class CricketBallTracker:
         self.BALL_DIAMETER_M = 0.072  # Cricket ball diameter in meters
         self.first_frame_main = None
         self.side_frame_for_main_frame1 = None
-        self.main_rotation = 0  # 0, 90, 180, or 270 degrees
-        self.side_rotation = 0  # 0, 90, 180, or 270 degrees
 
         self.background_frame_top = None
 
@@ -59,7 +47,8 @@ class CricketBallTracker:
         self.display = display.Display()
         self.calculators = calculators.Calculators()
         self.checkers = checkers.Checker()
-        self.ball_finder = automations.BallFinder()
+        self.top_down_ball_finder = automations.TopDownBallFinder()
+        self.side_on_ball_finder = automations.SideOnBallFinder()
 
         with open("config.yml", "r") as f:
             self.config_file = yaml.safe_load(f)
@@ -624,11 +613,7 @@ class CricketBallTracker:
 
     # ---------------------- Main Tracker ---------------------- #
     def run_main_tracker(self):
-        try:
-            self.cap, self.total_frames, self.frame_width, self.frame_height, self.fps = self.display.load_main_video()
-        except ValueError as e:
-            print(e)
-            return False
+        self.top_down_video = self.display.load_main_video()
 
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
         cv2.setMouseCallback(self.window_name, self.mouse_callback)
@@ -648,14 +633,8 @@ class CricketBallTracker:
         print("- O: Rotate video 90 degrees clockwise")
 
         while True:
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-            ret, frame = self.cap.read()
-            if not ret:
-                print("Frame read failed or end of main video.")
-                break
-
-            display_frame = self.display.transform_frame(frame.copy(), self.main_rotation)
-            self.drawers.draw_main_trajectory(display_frame, self.frame_positions, self.current_frame, self.frame_width, self.seam_points, self.seam_measurements, self.calibrations)
+            frame = self.top_down_video.get_current_frame()
+            self.drawers.draw_main_trajectory(frame, self.frame_positions, self.top_down_video.current_frame, self.top_down_video.frame_width, self.seam_points, self.seam_measurements, self.calibrations)
 
             if self.calibration_active:
                 cal_num = len(self.calibrations) + 1 if not self.calibrations or len(self.calibrations[-1][1]) == 2 else len(self.calibrations)
@@ -670,15 +649,15 @@ class CricketBallTracker:
 
             seam_angle, is_wobble, _ = self.checkers._check_seam_wobble(self.seam_measurements)
             seam_display = "Wobble Seam" if is_wobble else f"{seam_angle:.2f}°" if seam_angle is not None else "Not set"
-            self.drawers.draw_text(display_frame, status, (10, 40), font_scale=1.1)
-            self.drawers.draw_text(display_frame, f"Frame: {self.current_frame}/{self.total_frames-1}", (10, 80), font_scale=0.9)
-            self.drawers.draw_text(display_frame, f"Main Points: {len(self.frame_positions)}", (10, 110), font_scale=0.9)
-            self.drawers.draw_text(display_frame, f"Seam Angle: {seam_display}", (10, 140), font_scale=0.9)
-            self.drawers.draw_text(display_frame, f"Deceleration: {'{:.3f} m/s^2'.format(self.deceleration) if self.deceleration is not None else 'Not set'}", (10, 170), font_scale=0.9)
-            self.drawers.draw_text(display_frame, f"Meters/Pixel: {'{:.6f} m/px'.format(self.meters_per_pixel) if self.meters_per_pixel is not None else 'Not set'}", (10, 200), font_scale=0.9)
-            self.drawers.draw_text(display_frame, "S = Proceed to Side View", (10, 230), font_scale=0.9)
+            self.drawers.draw_text(frame, status, (10, 40), font_scale=1.1)
+            self.drawers.draw_text(frame, f"Frame: {self.top_down_video.current_frame}/{self.top_down_video.total_frames-1}", (10, 80), font_scale=0.9)
+            self.drawers.draw_text(frame, f"Main Points: {len(self.frame_positions)}", (10, 110), font_scale=0.9)
+            self.drawers.draw_text(frame, f"Seam Angle: {seam_display}", (10, 140), font_scale=0.9)
+            self.drawers.draw_text(frame, f"Deceleration: {'{:.3f} m/s^2'.format(self.deceleration) if self.deceleration is not None else 'Not set'}", (10, 170), font_scale=0.9)
+            self.drawers.draw_text(frame, f"Meters/Pixel: {'{:.6f} m/px'.format(self.meters_per_pixel) if self.meters_per_pixel is not None else 'Not set'}", (10, 200), font_scale=0.9)
+            self.drawers.draw_text(frame, "S = Proceed to Side View", (10, 230), font_scale=0.9)
 
-            cv2.imshow(self.window_name, display_frame)
+            cv2.imshow(self.window_name, frame)
             key_code = int(cv2.waitKey(10) & 0xFF)
             try:
                 key = Key(key_code)
@@ -687,7 +666,7 @@ class CricketBallTracker:
 
             match key:
                 case Key.q | Key.esc:
-                    self.cap.release()
+                    self.top_down_video.cap.release()
                     cv2.destroyAllWindows()
                     return False
                 case Key.c:
@@ -725,19 +704,19 @@ class CricketBallTracker:
                         else:
                             print("Seam angle tracking stopped.")
                 case Key.a:
-                    self.current_frame = self.display.previous_frame(self.current_frame, 1)
+                    self.top_down_video.change_frame(-1)
                 case Key.d:
-                    self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames, 1)
+                    self.top_down_video.change_frame(1)
                 case Key.A:
-                    self.current_frame = self.display.previous_frame(self.current_frame, 10)
+                    self.top_down_video.change_frame(-10)
                 case Key.D:
-                    self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames, 10)
+                    self.top_down_video.change_frame(10)
                 case Key.f:
                     if self.background_frame_top is None:
                         print("Set a background frame first by pressing 'B' on a clear frame.")
                     else:
                         cv2.imwrite("current_frame.jpg", frame)
-                        ball_data = self.ball_finder.find_ball(frame, self.background_frame_top)
+                        ball_data = self.top_down_ball_finder.find_ball(frame, self.background_frame_top)
                         if ball_data is not None:
                             print(f"Ball found: {ball_data}")
                         else:
@@ -752,28 +731,19 @@ class CricketBallTracker:
                     elif not self.frame_positions:
                         print("Cannot proceed without tracking at least one point.")
                     else:
-                        self.cap.release()
+                        self.top_down_video.cap.release()
                         cv2.destroyAllWindows()
                         return True
                 case Key.o:
-                    self.main_rotation = (self.main_rotation + 90) % 360
-                    print(f"Main view rotated to {self.main_rotation} degrees")
+                    self.top_down_video.rotate()
+                    print(f"Main view rotated to {self.top_down_video.rotation} degrees")
                 case Key.r:
                     self.reset()
 
-        self.cap.release()
-        cv2.destroyAllWindows()
-        return False
-
     # ---------------------- Side Tracker ---------------------- #
     def run_side_tracker(self):
-        try:
-            self.cap_side, self.total_frames_side, self.frame_width_side, self.frame_height_side = self.display.load_side_video()
-        except ValueError as e:
-            print(e)
-            return
+        self.side_on_video = self.display.load_side_video()
 
-        self.current_frame = 0
         cv2.namedWindow(self.window_name_side, cv2.WINDOW_NORMAL)
         cv2.setMouseCallback(self.window_name_side, self.mouse_callback_side)
 
@@ -791,14 +761,9 @@ class CricketBallTracker:
         print("- O: Rotate video 90 degrees clockwise")
 
         while True:
-            self.cap_side.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-            ret, frame = self.cap_side.read()
-            if not ret:
-                print("Frame read failed or end of side video.")
-                break
+            frame = self.side_on_video.get_current_frame()
 
-            display_frame = self.display.transform_frame(frame.copy(), self.side_rotation)
-            self.drawers.draw_side_trajectory(display_frame, self.side_positions, self.current_frame, self.side_calibration)
+            self.drawers.draw_side_trajectory(frame, self.side_positions, self.side_on_video.current_frame, self.side_calibration)
 
             if self.side_calibration_active:
                 points = len(self.side_calibration[1]) if self.side_calibration else 0
@@ -808,14 +773,14 @@ class CricketBallTracker:
             else:
                 status = "PAUSED - Press SPACE to track, C to calibrate after first point"
 
-            self.drawers.draw_text(display_frame, status, (10, 40), font_scale=1.1)
-            self.drawers.draw_text(display_frame, f"Frame: {self.current_frame}/{self.total_frames_side-1}", (10, 80), font_scale=0.9)
-            self.drawers.draw_text(display_frame, f"Side Points: {len(self.side_positions)}", (10, 110), font_scale=0.9)
-            self.drawers.draw_text(display_frame, f"Main Frame 1 = Side Frame {'Not set' if self.side_frame_for_main_frame1 is None else self.side_frame_for_main_frame1}", (10, 140), font_scale=0.9)
-            self.drawers.draw_text(display_frame, f"Focal Length: {'{:.2f} px'.format(self.side_focal_length_px) if self.side_focal_length_px is not None else 'Not set'}", (10, 170), font_scale=0.9)
-            self.drawers.draw_text(display_frame, "S = Save Excel", (10, 200), font_scale=0.9)
+            self.drawers.draw_text(frame, status, (10, 40), font_scale=1.1)
+            self.drawers.draw_text(frame, f"Frame: {self.side_on_video.current_frame}/{self.side_on_video.total_frames-1}", (10, 80), font_scale=0.9)
+            self.drawers.draw_text(frame, f"Side Points: {len(self.side_positions)}", (10, 110), font_scale=0.9)
+            self.drawers.draw_text(frame, f"Main Frame 1 = Side Frame {'Not set' if self.side_frame_for_main_frame1 is None else self.side_frame_for_main_frame1}", (10, 140), font_scale=0.9)
+            self.drawers.draw_text(frame, f"Focal Length: {'{:.2f} px'.format(self.side_focal_length_px) if self.side_focal_length_px is not None else 'Not set'}", (10, 170), font_scale=0.9)
+            self.drawers.draw_text(frame, "S = Save Excel", (10, 200), font_scale=0.9)
 
-            cv2.imshow(self.window_name_side, display_frame)
+            cv2.imshow(self.window_name_side, frame)
             key_code = int(cv2.waitKey(10) & 0xFF)
             try:
                 key = Key(key_code)
@@ -824,11 +789,13 @@ class CricketBallTracker:
 
             match key:
                 case Key.q | Key.esc:
-                    break
+                    self.side_on_video.cap.release()
+                    cv2.destroyAllWindows()
+                    return
                 case Key.c:
                     if self.side_frame_for_main_frame1 is None:
                         print("Error: Track the first ball position before calibrating.")
-                    elif self.current_frame != self.side_frame_for_main_frame1:
+                    elif self.side_on_video.current_frame != self.side_frame_for_main_frame1:
                         print(f"Error: Side calibration must occur in first tracked frame ({self.side_frame_for_main_frame1}).")
                     elif self.side_calibration and len(self.side_calibration[1]) == 2:
                         print("Side calibration already completed.")
@@ -845,18 +812,18 @@ class CricketBallTracker:
                     self.tracking_active = not self.tracking_active
                     print(f"{'Ball tracking started' if self.tracking_active else 'Ball tracking paused'}")
                 case Key.a:
-                    self.current_frame = self.display.previous_frame(self.current_frame, 1)
+                    self.side_on_video.change_frame(-1)
                 case Key.d:
-                    self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames_side, 1)
+                    self.side_on_video.change_frame(1)
                 case Key.A:
-                    self.current_frame = self.display.previous_frame(self.current_frame, 10)
+                    self.side_on_video.change_frame(-10)
                 case Key.D:
-                    self.current_frame = self.display.advance_frame(self.current_frame, self.total_frames_side, 10)
+                    self.side_on_video.change_frame(10)
                 case Key.s:
                     self.save_to_excel()
                 case Key.o:
-                    self.side_rotation = (self.side_rotation + 90) % 360
-                    print(f"Side view rotated to {self.side_rotation} degrees")
+                    self.side_on_video.rotate()
+                    print(f"Side view rotated to {self.side_on_video.rotation} degrees")
                 case Key.r:
                     self.side_positions = []
                     self.side_calibration = None
@@ -864,25 +831,12 @@ class CricketBallTracker:
                     self.side_frame_for_main_frame1 = None
                     print("Side view tracking, calibration, and frame mapping reset.")
 
-        self.cap_side.release()
-        cv2.destroyAllWindows()
-
     # ---------------------- Main Entry ---------------------- #
     def run_tracker(self):
         if self.run_main_tracker():
             self.run_side_tracker()
 
 def display_excel(excel_file_path):
-    """
-    Standalone function to display Excel file contents in an interactive GUI window.
-    Supports multiple sheets with tabs.
-    
-    Usage:
-        display_excel("path/to/your/file.xlsx")
-    
-    Args:
-        excel_file_path (str): Path to the Excel file to display
-    """
     try:
         # Read all sheets from Excel file
         excel_file = pd.ExcelFile(excel_file_path)
