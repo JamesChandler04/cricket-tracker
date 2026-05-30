@@ -5,28 +5,65 @@ import math
 import time
 from typing import Optional
 from helpers import BallData, Coord, Video
+import sys
+from enum import Enum
 
-tracking_folder = "tracking_output"
+top_down_tracking_folder = "top_down_tracking_output"
+side_on_tracking_folder = "side_on_tracking_output"
+# Set to 1 to process every frame. Skips frames until ball is found, then backtracks and processes every frame until the last frame with the ball.
+TOP_DOWN_FRAME_SKIP = 1
+SIDE_ON_FRAME_SKIP = 1
 
 TOP_DOWN_BALL_RADIUS = 90
 
-class TopDownBallFinder:
+class BallPosition(Enum):
+    BEFORE_FRAME = 0
+    IN_FRAME = 1
+    AFTER_FRAME = 2
 
-    def get_ball_data(self, video: Video) -> Optional[BallData]:
-        video.change_frame(245)
-        for _ in range(video.total_frames - 1):
+class TopDownBallFinder:
+    def get_ball_data(self, video: Video) -> list[BallData]:
+        ball_data_points: list[BallData] = []
+
+        # Skip frames until first ball is found
+        while video.get_current_frame_number() < video.total_frames - 1:
+            video.change_frame(TOP_DOWN_FRAME_SKIP - 1)
             st = time.time()
             background_frame = video.get_current_frame()
             video.change_frame(1)
             current_frame = video.get_current_frame()
+            ball_data = self.find_ball(current_frame, background_frame)
+            print(f"Checking frame {video.current_frame} for ball ({(time.time() - st)*1000:.2f}ms)")
+            if ball_data:
+                # Backtrack to last frame before ball was found to start processing from there
+                video.change_frame(-(TOP_DOWN_FRAME_SKIP + 1))
+                print(f"Ball found in frame {video.current_frame}, starting processing from frame {video.current_frame - TOP_DOWN_FRAME_SKIP - 1}.")
+                break
+            print(f"No ball found in frame {video.current_frame}, skipping {TOP_DOWN_FRAME_SKIP - 1} frames.")
 
+        ball_position = BallPosition.BEFORE_FRAME
+
+        # Process every frame until ball is no longer found, then stop alltogether.
+        while ball_position is not BallPosition.AFTER_FRAME and video.get_current_frame_number() < video.total_frames - 1:
+            st = time.time()
+            background_frame = video.get_current_frame()
+            video.change_frame(1)
+            current_frame = video.get_current_frame()
             ball_data = self.find_ball(current_frame, background_frame)
             if ball_data:
-                cv2.imwrite(f"ball_in_frame/frame_{video.current_frame:04d}.jpg", current_frame)
                 ball_data = self.find_seam(ball_data, current_frame)
+            if ball_data:
+                ball_data_points.append(ball_data)
+                cv2.imwrite(f"{top_down_tracking_folder}/frame_{video.current_frame:04d}.jpg", current_frame)
+                ball_position = BallPosition.IN_FRAME
+            else:
+                # If ball has left the frame, stop processing. If ball before frame, keep looking for first frame with ball
+                if ball_position == BallPosition.IN_FRAME:
+                    ball_position = BallPosition.AFTER_FRAME
+                    print(f"Ball lost after frame {video.current_frame}, stopping processing.")
             et = time.time()
-            print(f"Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
-        return ball_data
+            print(f"Top Down Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
+        return ball_data_points
 
     def find_ball(self, frame, background_frame) -> Optional[BallData]:
         if frame is None or background_frame is None:
@@ -39,7 +76,6 @@ class TopDownBallFinder:
         blurred_bg = cv2.GaussianBlur(background_frame, (7, 7), 0)
 
         grey = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
-        background_grey = cv2.cvtColor(blurred_bg, cv2.COLOR_BGR2GRAY)
 
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
         background_hsv = cv2.cvtColor(blurred_bg, cv2.COLOR_BGR2HSV)
@@ -68,9 +104,9 @@ class TopDownBallFinder:
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
-        cv2.imwrite(f"{tracking_folder}/motion_mask.jpg", motion_mask)
-        cv2.imwrite(f"{tracking_folder}/red_mask.jpg", red_mask)
-        cv2.imwrite(f"{tracking_folder}/combined_mask.jpg", combined_mask)
+        cv2.imwrite(f"{top_down_tracking_folder}/motion_mask.jpg", motion_mask)
+        cv2.imwrite(f"{top_down_tracking_folder}/red_mask.jpg", red_mask)
+        cv2.imwrite(f"{top_down_tracking_folder}/combined_mask.jpg", combined_mask)
 
         best_circle = None
         grey_blurred = cv2.medianBlur(grey, 5)
@@ -152,9 +188,8 @@ class TopDownBallFinder:
         original_frame = frame.copy()
         cv2.circle(frame, (centre_x, centre_y), radius, (0, 255, 0), 2)
         cv2.circle(frame, (centre_x, centre_y), 2, (0, 0, 255), 3)
-        cv2.imwrite(f"{tracking_folder}/detected_ball.jpg", frame)
+        cv2.imwrite(f"{top_down_tracking_folder}/detected_ball.jpg", frame)
 
-        os.makedirs(tracking_folder, exist_ok=True)
         margin = int(radius * 0.25)
         x0 = max(0, centre_x - radius - margin)
         y0 = max(0, centre_y - radius - margin)
@@ -166,7 +201,7 @@ class TopDownBallFinder:
         cv2.circle(mask, (centre_x - x0, centre_y - y0), radius, 255, -1)
         cropped_ball[mask == 0] = 0
 
-        cv2.imwrite(f"{tracking_folder}/cropped_ball.jpg", cropped_ball)
+        cv2.imwrite(f"{top_down_tracking_folder}/cropped_ball.jpg", cropped_ball)
 
         return BallData(
             top_left=Coord(centre_x - radius, centre_y - radius),
@@ -202,8 +237,7 @@ class TopDownBallFinder:
         white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
         white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
-        os.makedirs(tracking_folder, exist_ok=True)
-        cv2.imwrite(f"{tracking_folder}/seam_white_mask.jpg", white_mask)
+        cv2.imwrite(f"{top_down_tracking_folder}/seam_white_mask.jpg", white_mask)
 
         edges = cv2.Canny(white_mask, 50, 150)
         lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi / 180, threshold=20, minLineLength=15, maxLineGap=8)
@@ -282,8 +316,6 @@ class TopDownBallFinder:
         ball_data.seam_angle = seam_angle
         # --- Save images: cropped (masked) with seam line, and full image with circle+seam ---
         try:
-            os.makedirs(tracking_folder, exist_ok=True)
-
             # Cropped masked image (outside circle black) with seam line
             cropped = roi.copy()
             # compute radius from bounding box
@@ -302,7 +334,7 @@ class TopDownBallFinder:
             s1 = (int(ball_data.seam_start.x - x0), int(ball_data.seam_start.y - y0))
             s2 = (int(ball_data.seam_end.x - x0), int(ball_data.seam_end.y - y0))
             cv2.line(cropped_masked, s1, s2, (0, 255, 255), 2)
-            cv2.imwrite(f"{tracking_folder}/cropped_ball_with_seam.jpg", cropped_masked)
+            cv2.imwrite(f"{top_down_tracking_folder}/cropped_ball_with_seam.jpg", cropped_masked)
 
             # Full image with detected circle and seam
             full_with_seam = frame.copy()
@@ -310,23 +342,59 @@ class TopDownBallFinder:
             cv2.circle(full_with_seam, (centre.x, centre.y), radius, (0, 255, 0), 2)
             # draw seam on full image (yellow)
             cv2.line(full_with_seam, (ball_data.seam_start.x, ball_data.seam_start.y), (ball_data.seam_end.x, ball_data.seam_end.y), (0, 255, 255), 2)
-            cv2.imwrite(f"{tracking_folder}/detected_ball_with_seam.jpg", full_with_seam)
+            cv2.imwrite(f"{top_down_tracking_folder}/detected_ball_with_seam.jpg", full_with_seam)
         except Exception:
             pass
 
         return ball_data
 
 class SideOnBallFinder:
-    def find_ball(self, video: Video) -> Optional[BallData]:
+    def get_ball_data(self, video: Video) -> list[BallData]:
+        ball_data_points: list[BallData] = []
+
+        # Skip frames until first ball is found
+        while video.get_current_frame_number() < video.total_frames - 1:
+            video.change_frame(SIDE_ON_FRAME_SKIP - 1)
+            st = time.time()
+            background_frame = video.get_current_frame()
+            video.change_frame(1)
+            current_frame = video.get_current_frame()
+            ball_data = self.find_ball(current_frame, background_frame)
+            print(f"Checking frame {video.current_frame} for ball ({(time.time() - st)*1000:.2f}ms)")
+            if ball_data:
+                # Backtrack to last frame before ball was found to start processing from there
+                video.change_frame(-(SIDE_ON_FRAME_SKIP + 1))
+                print(f"Ball found in frame {video.current_frame}, starting processing from frame {video.current_frame - SIDE_ON_FRAME_SKIP - 1}.")
+                break
+            print(f"No ball found in frame {video.current_frame}, skipping {SIDE_ON_FRAME_SKIP - 1} frames.")
+
+        ball_position = BallPosition.BEFORE_FRAME
+
+        # Process every frame until ball is no longer found, then stop alltogether.
+        while ball_position is not BallPosition.AFTER_FRAME and video.get_current_frame_number() < video.total_frames - 1:
+            st = time.time()
+            background_frame = video.get_current_frame()
+            video.change_frame(1)
+            current_frame = video.get_current_frame()
+            ball_data = self.find_ball(current_frame, background_frame)
+            if ball_data:
+                ball_data_points.append(ball_data)
+                cv2.imwrite(f"{side_on_tracking_folder}/frame_{video.current_frame:04d}.jpg", current_frame)
+                ball_position = BallPosition.IN_FRAME
+            else:
+                # If ball has left the frame, stop processing. If ball before frame, keep looking for first frame with ball
+                if ball_position == BallPosition.IN_FRAME:
+                    ball_position = BallPosition.AFTER_FRAME
+                    print(f"Ball lost after frame {video.current_frame}, stopping processing.")
+            et = time.time()
+            print(f"Side On Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
+        return ball_data_points
+
+    def find_ball(self, current_frame, background_frame) -> Optional[BallData]:
         return None
 
-tester = TopDownBallFinder()
+# tester = TopDownBallFinder()
 
-top_down_video = Video("13.mp4")
+# top_down_video = Video("13.mp4")
 
-# curr_frame = cv2.imread("current_frame.jpg")
-# bg_frame = cv2.imread("background_frame.jpg")
-
-# print(tester.find_ball(curr_frame, bg_frame))
-
-print(tester.get_ball_data(top_down_video))
+# print(tester.get_ball_data(top_down_video))

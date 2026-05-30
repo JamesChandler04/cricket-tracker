@@ -98,6 +98,9 @@ class Video:
         self._cached_frame = frame.copy()
         self._cached_frame_index = self.current_frame
         return self._rotate_frame(frame)
+    
+    def get_current_frame_number(self):
+        return self.current_frame
 
     def change_frame(self, offset: int):
         new_frame = self.current_frame + offset
