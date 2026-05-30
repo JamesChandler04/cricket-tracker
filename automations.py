@@ -7,6 +7,9 @@ from typing import Optional
 from helpers import BallData, Coord, Video
 import sys
 from enum import Enum
+from dataclasses import dataclass
+
+import log_bridge
 
 top_down_tracking_folder = "top_down_tracking_output"
 side_on_tracking_folder = "side_on_tracking_output"
@@ -16,14 +19,19 @@ SIDE_ON_FRAME_SKIP = 1
 
 TOP_DOWN_BALL_RADIUS = 90
 
+@dataclass
+class TrackedBallDataPoint:
+    frame_number: int
+    data: BallData
+
 class BallPosition(Enum):
     BEFORE_FRAME = 0
     IN_FRAME = 1
     AFTER_FRAME = 2
 
 class TopDownBallFinder:
-    def get_ball_data(self, video: Video) -> list[BallData]:
-        ball_data_points: list[BallData] = []
+    def get_ball_data(self, video: Video) -> list[TrackedBallDataPoint]:
+        ball_data_points: list[TrackedBallDataPoint] = []
 
         # Skip frames until first ball is found
         while video.get_current_frame_number() < video.total_frames - 1:
@@ -53,7 +61,7 @@ class TopDownBallFinder:
             if ball_data:
                 ball_data = self.find_seam(ball_data, current_frame)
             if ball_data:
-                ball_data_points.append(ball_data)
+                ball_data_points.append(TrackedBallDataPoint(frame_number=video.current_frame, data=ball_data))
                 cv2.imwrite(f"{top_down_tracking_folder}/frame_{video.current_frame:04d}.jpg", current_frame)
                 ball_position = BallPosition.IN_FRAME
             else:
@@ -349,8 +357,8 @@ class TopDownBallFinder:
         return ball_data
 
 class SideOnBallFinder:
-    def get_ball_data(self, video: Video) -> list[BallData]:
-        ball_data_points: list[BallData] = []
+    def get_ball_data(self, video: Video) -> list[TrackedBallDataPoint]:
+        ball_data_points: list[TrackedBallDataPoint] = []
 
         # Skip frames until first ball is found
         while video.get_current_frame_number() < video.total_frames - 1:
@@ -378,7 +386,7 @@ class SideOnBallFinder:
             current_frame = video.get_current_frame()
             ball_data = self.find_ball(current_frame, background_frame)
             if ball_data:
-                ball_data_points.append(ball_data)
+                ball_data_points.append(TrackedBallDataPoint(frame_number=video.current_frame, data=ball_data))
                 cv2.imwrite(f"{side_on_tracking_folder}/frame_{video.current_frame:04d}.jpg", current_frame)
                 ball_position = BallPosition.IN_FRAME
             else:
