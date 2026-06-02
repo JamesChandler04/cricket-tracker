@@ -11,6 +11,12 @@ from dataclasses import dataclass
 
 import log_bridge
 
+'''
+TODO:
+- Downscale before processing.
+- Only save images on ball found.
+'''
+
 top_down_tracking_folder = "top_down_tracking_output"
 side_on_tracking_folder = "side_on_tracking_output"
 # Set to 1 to process every frame. Skips frames until ball is found, then backtracks and processes every frame until the last frame with the ball.

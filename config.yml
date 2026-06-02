@@ -1,4 +1,4 @@
-output:
+raw_output:
   folder: output_folder # If set to null, will prompt during program execution
   save_excel: false
   save_csv: true

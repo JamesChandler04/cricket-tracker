@@ -143,3 +143,17 @@ class Video:
                 return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
             case _:
                 return frame
+            
+class Config:
+    def __init__(self, path: str):
+        self.path = path
+        self.data = self._load_config()
+
+    def _load_config(self):
+        import json
+        try:
+            with open(self.path, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading config file: {e}")
+            return {}

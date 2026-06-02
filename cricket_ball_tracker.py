@@ -14,7 +14,7 @@ import drawers
 import display
 import calculators
 import automations
-from helpers import Key, Video
+from helpers import Key, Video, Config
 
 if not typing.TYPE_CHECKING:
     import xlsxwriter # Used when saving to excel
@@ -529,7 +529,7 @@ class CricketBallTracker:
                             side_cal_data.append([frame_num, f"{pixel_distance:.2f}", f"{y_m:.3f}", f"{f:.2f}"])
         side_cal_df = pd.DataFrame(side_cal_data, columns=["Frame Number", "Pixel Diameter", "Y-Position (m)", "Focal Length (px)"])
 
-        if not self.config_file["output"]["folder"]:
+        if not self.config_file["raw_output"]["folder"]:
             while True:
                 folder_path = input("Enter the folder path to save the Excel file (leave blank for current directory): ").strip().strip('"')
                 if not folder_path:
@@ -539,7 +539,7 @@ class CricketBallTracker:
                     break
                 print("Invalid folder path. Please enter a valid directory or leave blank for current directory.")
         else:
-            folder_path = self.config_file["output"]["folder"]
+            folder_path = self.config_file["raw_output"]["folder"]
             os.makedirs(folder_path, exist_ok=True)
             print(f"Output folder configured to '{folder_path}'. All files will be saved in there.")
 
