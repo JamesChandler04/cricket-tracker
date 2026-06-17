@@ -54,13 +54,13 @@ class CricketBallTracker:
             self.config_file = yaml.safe_load(f)
 
     # ---------------------- Mouse ---------------------- #
-    def mouse_callback(self, event, x, y, flags, param):
+    def top_down_mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             if self.calibration_active:
                 if not self.calibrations or len(self.calibrations[-1][1]) == 2:
-                    self.calibrations.append((self.current_frame, []))
+                    self.calibrations.append((self.top_down_video.get_current_frame_number(), []))
                 self.calibrations[-1][1].append((x, y))
-                print(f"Main diameter point added in frame {self.current_frame}: ({x}, {y})")
+                print(f"Main diameter point added in frame {self.top_down_video.get_current_frame_number()}: ({x}, {y})")
                 if len(self.calibrations[-1][1]) == 2:
                     self.calibrations, self.meters_per_pixel = self.calculators._calculate_meters_per_pixel(self.calibrations, self.BALL_DIAMETER_M, self.meters_per_pixel)
                     if len(self.calibrations) >= 2:
@@ -69,43 +69,43 @@ class CricketBallTracker:
                     else:
                         print("Main first calibration completed. Navigate to another frame and press 'C'.")
             elif self.tracking_active and self.meters_per_pixel is not None:
-                timestamp = self.current_frame / self.fps
+                timestamp = self.top_down_video.get_current_frame_number() / self.fps
                 if not self.first_frame_main:
-                    self.first_frame_main = self.current_frame
+                    self.first_frame_main = self.top_down_video.get_current_frame_number()
                     print(f"Main view Frame 1 set to raw frame {self.first_frame_main}")
-                self._add_or_replace_point_for_frame(self.current_frame, x, y, timestamp, is_side=False)
-                print(f"Main View - Frame {self.current_frame}: Ball at (x={x}, y={y}) - Time: {timestamp:.3f}s")
+                self._add_or_replace_point_for_frame(self.top_down_video.get_current_frame_number(), x, y, timestamp, is_side=False)
+                print(f"Main View - Frame {self.top_down_video.get_current_frame_number()}: Ball at (x={x}, y={y}) - Time: {timestamp:.3f}s")
             elif self.seam_angle_active and self.meters_per_pixel is not None:
                 self.seam_points.append((x, y))
                 print(f"Seam point added: ({x}, {y})")
                 if len(self.seam_points) == 2:
-                    self.seam_measurements, self.seam_points = self.calculators._calculate_seam_angle(self.seam_points, self.seam_measurements, self.current_frame)
+                    self.seam_measurements, self.seam_points = self.calculators._calculate_seam_angle(self.seam_points, self.seam_measurements, self.top_down_video.get_current_frame_number())
                     self.seam_angle_active = False
-                    print(f"Seam angle tracking stopped for frame {self.current_frame}. Angle: {self.seam_measurements[-1][1]:.2f} degrees")
+                    print(f"Seam angle tracking stopped for frame {self.top_down_video.get_current_frame_number()}. Angle: {self.seam_measurements[-1][1]:.2f} degrees")
 
-    def mouse_callback_side(self, event, x, y, flags, param):
+    def side_on_mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             if self.side_calibration_active:
                 if self.side_frame_for_main_frame1 is None:
                     print(f"Error: Track the first ball position before calibrating.")
                     return
-                if self.current_frame != self.side_frame_for_main_frame1:
+                if self.side_on_video.get_current_frame_number() != self.side_frame_for_main_frame1:
                     print(f"Error: Side calibration must occur in first tracked frame ({self.side_frame_for_main_frame1}).")
                     return
                 if self.side_calibration is None or len(self.side_calibration[1]) == 2:
-                    self.side_calibration = (self.current_frame, [])
+                    self.side_calibration = (self.side_on_video.get_current_frame_number(), [])
                 self.side_calibration[1].append((x, y))
-                print(f"Side diameter point added in frame {self.current_frame}: ({x}, {y})")
+                print(f"Side diameter point added in frame {self.side_on_video.get_current_frame_number()}: ({x}, {y})")
                 if len(self.side_calibration[1]) == 2:
                     self.side_calibration_active = False
-                    print(f"Side calibration completed for frame {self.current_frame}.")
+                    print(f"Side calibration completed for frame {self.side_on_video.get_current_frame_number()}.")
             elif self.tracking_active:
-                timestamp = self.current_frame / self.fps
+                timestamp = self.side_on_video.get_current_frame_number() / self.fps
                 if not self.side_positions and self.side_frame_for_main_frame1 is None:
-                    self.side_frame_for_main_frame1 = self.current_frame
+                    self.side_frame_for_main_frame1 = self.side_on_video.get_current_frame_number()
                     print(f"Side view Frame 1 set to raw frame {self.side_frame_for_main_frame1}, corresponding to main view Frame 1")
-                self._add_or_replace_point_for_frame(self.current_frame, x, y, timestamp, is_side=True)
-                print(f"Side View - Frame {self.current_frame}: Ball at (x={x}, z={y}) - Time: {timestamp:.3f}s")
+                self._add_or_replace_point_for_frame(self.side_on_video.get_current_frame_number(), x, y, timestamp, is_side=True)
+                print(f"Side View - Frame {self.side_on_video.get_current_frame_number()}: Ball at (x={x}, z={y}) - Time: {timestamp:.3f}s")
 
     # ---------------------- Data Helpers ---------------------- #
     def _add_or_replace_point_for_frame(self, frame_no, x, y, t, is_side=False):
@@ -616,7 +616,7 @@ class CricketBallTracker:
         self.top_down_video = self.display.load_main_video()
 
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-        cv2.setMouseCallback(self.window_name, self.mouse_callback)
+        cv2.setMouseCallback(self.window_name, self.top_down_mouse_callback)
 
         print("\n=== CRICKET BALL TRACKER - MAIN VIEW (BIRD'S EYE) ===")
         print("Controls:")
@@ -745,7 +745,7 @@ class CricketBallTracker:
         self.side_on_video = self.display.load_side_video()
 
         cv2.namedWindow(self.window_name_side, cv2.WINDOW_NORMAL)
-        cv2.setMouseCallback(self.window_name_side, self.mouse_callback_side)
+        cv2.setMouseCallback(self.window_name_side, self.side_on_mouse_callback)
 
         print("\n=== CRICKET BALL TRACKER - SIDE VIEW ===")
         print("First click to track the ball will set this as Frame 1, corresponding to main view Frame 1.")

@@ -9,6 +9,7 @@ import sys
 from enum import Enum
 from dataclasses import dataclass
 import yaml
+import multiprocessing as mp
 
 import log_bridge
 
@@ -29,7 +30,7 @@ TOP_DOWN_FRAME_SKIP = 1
 SIDE_ON_FRAME_SKIP = 1
 
 # Ball size (radius in pixels)
-TOP_DOWN_BALL_RADIUS = 90
+TOP_DOWN_BALL_RADIUS = 360
 SIDE_ON_BALL_RADIUS  = 30
 
 # Thickness of the detection circle drawn on debug images (pixels)
@@ -91,6 +92,10 @@ class BallPosition(Enum):
     AFTER_FRAME = 2
 
 class TopDownBallFinder:
+    def new_get_ball_data(self, video: Video) -> list[TrackedBallDataPoint]:
+        workers = mp.Pool(processes=mp.cpu_count() - 1)
+        return []
+
     def get_ball_data(self, video: Video) -> list[TrackedBallDataPoint]:
         ball_data_points: list[TrackedBallDataPoint] = []
 
@@ -127,6 +132,7 @@ class TopDownBallFinder:
                 ball_position = BallPosition.IN_FRAME
             else:
                 if ball_position == BallPosition.IN_FRAME:
+                    continue
                     ball_position = BallPosition.AFTER_FRAME
                     print(f"Ball lost after frame {video.current_frame}, stopping processing.")
             et = time.time()
