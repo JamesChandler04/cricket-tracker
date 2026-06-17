@@ -30,7 +30,7 @@ TOP_DOWN_FRAME_SKIP = 1
 SIDE_ON_FRAME_SKIP = 1
 
 # Ball size (radius in pixels)
-TOP_DOWN_BALL_RADIUS = 360
+TOP_DOWN_BALL_RADIUS = 75
 SIDE_ON_BALL_RADIUS  = 30
 
 # Thickness of the detection circle drawn on debug images (pixels)
@@ -38,8 +38,8 @@ DETECTION_CIRCLE_THICKNESS = 4
 
 # Ball colour HSV ranges
 TOP_DOWN_BALL_COLOR_RANGES = [
-    (np.array([0,   140, 100]), np.array([8,   255, 255])),
-    (np.array([172, 140, 100]), np.array([180, 255, 255]))
+    (np.array([0,   60,  20]), np.array([12,  255, 255])),
+    (np.array([168, 60,  20]), np.array([180, 255, 255]))
 ]
 SIDE_ON_BALL_COLOR_RANGES = [
     (np.array([0,   120,  80]), np.array([10,  255, 255])),
@@ -222,7 +222,7 @@ class TopDownBallFinder:
             candidates = []
             for cnt in contours:
                 area = cv2.contourArea(cnt)
-                if area < 500 or area > 20000:
+                if area < 500 or area > 30000:
                     continue
                 (x, y), radius = cv2.minEnclosingCircle(cnt)
                 radius = float(radius)
@@ -280,9 +280,6 @@ class TopDownBallFinder:
         )
 
     def find_seam(self, ball_data: BallData, frame) -> Optional[BallData]:
-        if frame is None or ball_data is None:
-            return None
-
         x0 = max(0, ball_data.top_left.x)
         y0 = max(0, ball_data.top_left.y)
         x1 = min(frame.shape[1], ball_data.bottom_right.x)
@@ -599,6 +596,9 @@ class SideOnBallFinder:
         )
 
 
-# tester = TopDownBallFinder()
-# top_down_video = Video("13.mp4")
-# print(tester.get_ball_data(top_down_video))
+tester = TopDownBallFinder()
+
+background = cv2.imread("background_frame.jpg")
+current = cv2.imread("current_frame.jpg")
+
+print(tester.find_ball(current, background))

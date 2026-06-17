@@ -69,7 +69,7 @@ class CricketBallTracker:
                     else:
                         print("Main first calibration completed. Navigate to another frame and press 'C'.")
             elif self.tracking_active and self.meters_per_pixel is not None:
-                timestamp = self.top_down_video.get_current_frame_number() / self.fps
+                timestamp = self.top_down_video.get_current_frame_number() / self.top_down_video.fps
                 if not self.first_frame_main:
                     self.first_frame_main = self.top_down_video.get_current_frame_number()
                     print(f"Main view Frame 1 set to raw frame {self.first_frame_main}")
@@ -100,7 +100,7 @@ class CricketBallTracker:
                     self.side_calibration_active = False
                     print(f"Side calibration completed for frame {self.side_on_video.get_current_frame_number()}.")
             elif self.tracking_active:
-                timestamp = self.side_on_video.get_current_frame_number() / self.fps
+                timestamp = self.side_on_video.get_current_frame_number() / self.side_on_video.fps
                 if not self.side_positions and self.side_frame_for_main_frame1 is None:
                     self.side_frame_for_main_frame1 = self.side_on_video.get_current_frame_number()
                     print(f"Side view Frame 1 set to raw frame {self.side_frame_for_main_frame1}, corresponding to main view Frame 1")
@@ -244,7 +244,7 @@ class CricketBallTracker:
                 records.append([frame_counter, t, x_m_projected, cum_dist, None])
                 t += t_step
                 frame_counter += 1
-                if self.side_frame_for_main_frame1 is not None and frame_counter - 1 + self.side_frame_for_main_frame1 >= self.total_frames_side:
+                if self.side_frame_for_main_frame1 is not None and frame_counter - 1 + self.side_frame_for_main_frame1 >= self.side_on_video.total_frames:
                     print(f"Reached end of side video at frame {frame_counter - 1 + self.side_frame_for_main_frame1}")
                     break
                 if cum_dist >= 17.0:
@@ -399,7 +399,7 @@ class CricketBallTracker:
         t0 = self.frame_positions[0][3]
         x0_px, y0_px = self.frame_positions[0][1], self.frame_positions[0][2]
         x0_m = x0_px * self.meters_per_pixel
-        y0_m = (self.frame_height - y0_px) * self.meters_per_pixel
+        y0_m = (self.top_down_video.frame_height - y0_px) * self.meters_per_pixel
         initial_speed = None
 
         initial_speeds = []
@@ -408,7 +408,7 @@ class CricketBallTracker:
             if i < len(self.frame_positions):
                 frame_num, x_px, y_px, t = self.frame_positions[i]
                 prev_frame_num, px_prev, py_prev, t_prev = self.frame_positions[i-1]
-                dt = max(t - t_prev, 1.0 / self.fps)
+                dt = max(t - t_prev, 1.0 / self.top_down_video.fps)
                 dist_px = math.hypot(x_px - px_prev, y_px - py_prev)
                 dist_m = dist_px * self.meters_per_pixel
                 speed_ms = dist_m / dt if dt > 0 else 0.0
@@ -420,7 +420,7 @@ class CricketBallTracker:
         prev = None
         for i, (frame_num, x_px, y_px, t) in enumerate(self.frame_positions):
             x_m = x_px * self.meters_per_pixel - x0_m
-            y_m = (self.frame_height - y_px) * self.meters_per_pixel - y0_m
+            y_m = (self.top_down_video.frame_height - y_px) * self.meters_per_pixel - y0_m
             adj_frame = i + 1
             adj_time = t - t0
             if prev is None:
@@ -429,7 +429,7 @@ class CricketBallTracker:
                 speed_kmh = None
             else:
                 _, _, _, t_prev = prev
-                dt = max(t - t_prev, 1.0 / self.fps)
+                dt = max(t - t_prev, 1.0 / self.top_down_video.fps)
                 dist_px = math.hypot(x_px - prev[1], y_px - prev[2])
                 dist_m = dist_px * self.meters_per_pixel
                 speed_ms = dist_m / dt if dt > 0 else 0.0
