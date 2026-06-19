@@ -33,14 +33,21 @@ SIDE_ON_FRAME_SKIP = 1
 TOP_DOWN_BALL_RADIUS = 75
 SIDE_ON_BALL_RADIUS  = 30
 
+TOP_DOWN_MAX_DIFFERENCE = 20
+
 # Thickness of the detection circle drawn on debug images (pixels)
 DETECTION_CIRCLE_THICKNESS = 4
 
-# Ball colour HSV ranges
+# Ball colour HSV ranges (red)
 TOP_DOWN_BALL_COLOR_RANGES = [
     (np.array([0,   60,  20]), np.array([12,  255, 255])),
     (np.array([168, 60,  20]), np.array([180, 255, 255]))
 ]
+
+# Seam colour HSV range (white)
+SEAM_COLOUR_RANGE = (np.array([0, 0, 100]), np.array([180, 70, 255]))
+
+
 SIDE_ON_BALL_COLOR_RANGES = [
     (np.array([0,   120,  80]), np.array([10,  255, 255])),
     (np.array([170, 120,  80]), np.array([180, 255, 255]))
@@ -226,7 +233,7 @@ class TopDownBallFinder:
                     continue
                 (x, y), radius = cv2.minEnclosingCircle(cnt)
                 radius = float(radius)
-                if radius < 20 or radius > 180:
+                if abs(radius - TOP_DOWN_BALL_RADIUS) > TOP_DOWN_MAX_DIFFERENCE:
                     continue
                 perimeter = cv2.arcLength(cnt, True)
                 if perimeter <= 0:
@@ -266,7 +273,7 @@ class TopDownBallFinder:
         cropped_ball[mask == 0] = 0
         cv2.imwrite(f"{top_down_tracking_folder}/cropped_ball.jpg", cropped_ball)
 
-        # ── Map local coords back to full-image space ─────────────────────────
+        # Map local coords back to full-image space
         centre_x += x_offset
         centre_y += y_offset
 
@@ -291,9 +298,7 @@ class TopDownBallFinder:
         roi = frame[y0:y1, x0:x1]
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-        lower_white = np.array([0, 0, 140])
-        upper_white = np.array([180, 160, 255])
-        white_mask = cv2.inRange(hsv, lower_white, upper_white)
+        white_mask = cv2.inRange(hsv, SEAM_COLOUR_RANGE[0], SEAM_COLOUR_RANGE[1])
 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
@@ -601,4 +606,8 @@ tester = TopDownBallFinder()
 background = cv2.imread("background_frame.jpg")
 current = cv2.imread("current_frame.jpg")
 
-print(tester.find_ball(current, background))
+ball_data = tester.find_ball(current, background)
+print(ball_data)
+
+if ball_data:
+    print(tester.find_seam(ball_data, current))

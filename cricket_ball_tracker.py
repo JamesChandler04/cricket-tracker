@@ -178,7 +178,7 @@ class CricketBallTracker:
             return None
 
         # Initial trajectory angle (used for projected X only)
-        initial_trajectory = self.calculators._calculate_initial_trajectory(self.frame_positions, self.frame_height, self.meters_per_pixel)
+        initial_trajectory = self.calculators._calculate_initial_trajectory(self.frame_positions, self.top_down_video.frame_height, self.meters_per_pixel)
         if initial_trajectory is None:
             print("Cannot build 3D Data: Initial trajectory not available.")
             return None
