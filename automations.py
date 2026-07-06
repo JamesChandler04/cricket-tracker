@@ -30,19 +30,33 @@ TOP_DOWN_FRAME_SKIP = 1
 SIDE_ON_FRAME_SKIP = 1
 
 # Ball size (radius in pixels)
-TOP_DOWN_BALL_RADIUS = 75
+TOP_DOWN_BALL_RADIUS = 69   # measured: locked-on ball is 138 px across -> r = 69
 SIDE_ON_BALL_RADIUS  = 30
 
-TOP_DOWN_MAX_DIFFERENCE = 20
+# Strictness knob for the top-down size gate. Smaller = stricter.
+# Both detection paths (Hough + contour) only accept radii within
+# TOP_DOWN_BALL_RADIUS +/- TOP_DOWN_MAX_DIFFERENCE.
+TOP_DOWN_MAX_DIFFERENCE = 15
+TOP_DOWN_MIN_RADIUS = TOP_DOWN_BALL_RADIUS - TOP_DOWN_MAX_DIFFERENCE   # 54
+TOP_DOWN_MAX_RADIUS = TOP_DOWN_BALL_RADIUS + TOP_DOWN_MAX_DIFFERENCE   # 84
 
 # Thickness of the detection circle drawn on debug images (pixels)
 DETECTION_CIRCLE_THICKNESS = 4
 
-# Ball colour HSV ranges (red)
+# Ball colour HSV ranges (red). Kept LOOSE on purpose so the full ball is captured
+# even when motion blur desaturates its edges. Skin (red in hue but pale) is NOT
+# rejected here any more -- that happens per-candidate via the blob-level median
+# saturation test (TOP_DOWN_MIN_MEDIAN_SAT) in find_ball.
 TOP_DOWN_BALL_COLOR_RANGES = [
-    (np.array([0,   60,  20]), np.array([12,  255, 255])),
-    (np.array([168, 60,  20]), np.array([180, 255, 255]))
+    (np.array([0,   70, 20]), np.array([14,  255, 255])),
+    (np.array([166, 70, 20]), np.array([180, 255, 255]))
 ]
+
+# A real ball blob is vividly saturated THROUGHOUT (median S ~140-190); the bowler's
+# skin is dull (median S <=117). A candidate whose median saturation is below this is
+# rejected as skin. This survives motion blur -- blur lowers individual pixels' S, but
+# not the blob median.
+TOP_DOWN_MIN_MEDIAN_SAT = 120
 
 # Seam colour HSV range (white)
 SEAM_COLOUR_RANGE = (np.array([0, 0, 100]), np.array([180, 70, 255]))
@@ -185,7 +199,11 @@ class TopDownBallFinder:
         h, w = frame.shape[:2]
         combined_mask[int(h * 0.75):, :] = 0
 
-        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        # The tight maroon range excludes the bright white seam, leaving a gap
+        # across the middle of the ball. A wide close (sized to the seam band)
+        # bridges it so the ball stays one round blob; the 9x9 open won't re-split it.
+        seam_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, seam_kernel, iterations=2)
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
         cv2.imwrite(f"{top_down_tracking_folder}/motion_mask.jpg", motion_mask)
@@ -200,9 +218,9 @@ class TopDownBallFinder:
             dp=1.2,
             minDist=50,
             param1=200,
-            param2=25,
-            minRadius=25,
-            maxRadius=180
+            param2=15,
+            minRadius=TOP_DOWN_MIN_RADIUS,
+            maxRadius=TOP_DOWN_MAX_RADIUS
         )
 
         if circles is not None:
@@ -210,13 +228,17 @@ class TopDownBallFinder:
             for x, y, radius in circles:
                 if x - radius < 0 or y - radius < 0 or x + radius >= w or y + radius >= h:
                     continue
-                if radius < 20:
+                if abs(radius - TOP_DOWN_BALL_RADIUS) > TOP_DOWN_MAX_DIFFERENCE:
                     continue
                 circle_mask = np.zeros_like(combined_mask)
                 cv2.circle(circle_mask, (x, y), radius, 255, -1)
                 overlap = cv2.countNonZero(cv2.bitwise_and(circle_mask, combined_mask))
                 overlap_ratio = overlap / (np.pi * radius * radius)
                 if overlap_ratio < 0.25:
+                    continue
+                # Skin reject: the ball is vividly saturated, skin is pale.
+                ball_px = cv2.bitwise_and(circle_mask, combined_mask)
+                if np.median(hsv[:, :, 1][ball_px > 0]) < TOP_DOWN_MIN_MEDIAN_SAT:
                     continue
                 score = overlap_ratio - abs(radius - TOP_DOWN_BALL_RADIUS) / 90.0
                 if best_circle is None or score > best_circle[3]:
@@ -229,7 +251,7 @@ class TopDownBallFinder:
             candidates = []
             for cnt in contours:
                 area = cv2.contourArea(cnt)
-                if area < 500 or area > 30000:
+                if area < np.pi * TOP_DOWN_MIN_RADIUS ** 2 * 0.5 or area > np.pi * TOP_DOWN_MAX_RADIUS ** 2 * 1.3:
                     continue
                 (x, y), radius = cv2.minEnclosingCircle(cnt)
                 radius = float(radius)
@@ -239,13 +261,16 @@ class TopDownBallFinder:
                 if perimeter <= 0:
                     continue
                 circularity = 4 * np.pi * area / (perimeter * perimeter)
-                if circularity < 0.68:
+                if circularity < 0.45:
                     continue
                 mask = np.zeros_like(combined_mask)
                 cv2.drawContours(mask, [cnt], -1, 255, -1)
                 overlap = cv2.countNonZero(cv2.bitwise_and(mask, combined_mask))
                 fill_ratio = overlap / area
                 if fill_ratio < 0.55:
+                    continue
+                # Skin reject: the ball is vividly saturated, skin is pale.
+                if np.median(hsv[:, :, 1][cv2.bitwise_and(mask, combined_mask) > 0]) < TOP_DOWN_MIN_MEDIAN_SAT:
                     continue
                 score = fill_ratio + circularity * 1.5 - abs(radius - TOP_DOWN_BALL_RADIUS) / 70.0
                 candidates.append((cnt, x, y, radius, score))
@@ -601,13 +626,13 @@ class SideOnBallFinder:
         )
 
 
-tester = TopDownBallFinder()
+# tester = TopDownBallFinder()
 
-background = cv2.imread("background_frame.jpg")
-current = cv2.imread("current_frame.jpg")
+# background = cv2.imread("background_frame.jpg")
+# current = cv2.imread("current_frame.jpg")
 
-ball_data = tester.find_ball(current, background)
-print(ball_data)
+# ball_data = tester.find_ball(current, background)
+# print(ball_data)
 
-if ball_data:
-    print(tester.find_seam(ball_data, current))
+# if ball_data:
+#     print(tester.find_seam(ball_data, current))

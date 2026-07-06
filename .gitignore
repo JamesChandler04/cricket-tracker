@@ -1,4 +1,5 @@
 *.mp4
 *.xlsx
 *.pdf
+*.jpg
 __pycache__

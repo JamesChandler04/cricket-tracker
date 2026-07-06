@@ -162,7 +162,7 @@ class CricketBallTracker:
             for i in range(1, len(self.frame_positions)):
                 frame_num, x_px, y_px, t = self.frame_positions[i]
                 prev_frame_num, px_prev, py_prev, t_prev = self.frame_positions[i-1]
-                dt = max(t - t_prev, 1.0 / self.fps)
+                dt = max(t - t_prev, 1.0 / self.top_down_video.fps)
                 dist_px = abs(y_px - py_prev)
                 dist_m = dist_px * self.meters_per_pixel
                 speed_ms = dist_m / dt if dt > 0 else 0.0
@@ -211,7 +211,7 @@ class CricketBallTracker:
             z0 = cum_dist
             v0 = self.initial_velocity
             a = self.deceleration or 0.0
-            t_step = 1.0 / self.fps
+            t_step = 1.0 / self.top_down_video.fps
             t = last_time + t_step
             frame_counter = last_frame + 1
 
@@ -477,7 +477,7 @@ class CricketBallTracker:
             return
 
         df_3d_data = self._build_3d_data()
-        initial_trajectory = self.calculators._calculate_initial_trajectory(self.frame_positions, self.frame_height, self.meters_per_pixel)
+        initial_trajectory = self.calculators._calculate_initial_trajectory(self.frame_positions, self.top_down_video.frame_height, self.meters_per_pixel)
         seam_angle, is_wobble, max_seam_diff = self.checkers._check_seam_wobble(self.seam_measurements)
         percent_diff, is_invalid_cal = self.checkers._check_calibration_difference(self.calibrations, self.BALL_DIAMETER_M)
 
