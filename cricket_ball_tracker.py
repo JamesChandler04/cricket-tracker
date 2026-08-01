@@ -84,6 +84,7 @@ class CricketBallTracker:
                     print(f"Seam angle tracking stopped for frame {self.top_down_video.get_current_frame_number()}. Angle: {self.seam_measurements[-1][1]:.2f} degrees")
 
     def side_on_mouse_callback(self, event, x, y, flags, param):
+        print(f"Clicked at point ({x}, {y}).")
         if event == cv2.EVENT_LBUTTONDOWN:
             if self.side_calibration_active:
                 if self.side_frame_for_main_frame1 is None:

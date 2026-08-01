@@ -4,14 +4,14 @@ import os
 import math
 import time
 from typing import Optional
-from helpers import BallData, Coord, Video
+from helpers import TopDownBallData, SideOnBallData, Coord, Video
 import sys
 from enum import Enum
 from dataclasses import dataclass
 import yaml
 import multiprocessing as mp
 
-import log_bridge
+import log_bridge # Lets print statements to be redirected to console in window.
 
 '''
 TODO:
@@ -103,9 +103,14 @@ def _apply_bounding_box(frame, background_frame, bbox):
 
 
 @dataclass
-class TrackedBallDataPoint:
+class TopDownBallDataPoint:
     frame_number: int
-    data: BallData
+    data: TopDownBallData
+
+@dataclass
+class SideOnBallDataPoint:
+    frame_number: int
+    data: SideOnBallData
 
 class BallPosition(Enum):
     BEFORE_FRAME = 0
@@ -113,12 +118,8 @@ class BallPosition(Enum):
     AFTER_FRAME = 2
 
 class TopDownBallFinder:
-    def new_get_ball_data(self, video: Video) -> list[TrackedBallDataPoint]:
-        workers = mp.Pool(processes=mp.cpu_count() - 1)
-        return []
-
-    def get_ball_data(self, video: Video) -> list[TrackedBallDataPoint]:
-        ball_data_points: list[TrackedBallDataPoint] = []
+    def get_ball_data(self, video: Video) -> list[TopDownBallDataPoint]:
+        ball_data_points: list[TopDownBallDataPoint] = []
 
         # Skip frames until first ball is found
         while video.get_current_frame_number() < video.total_frames - 1:
@@ -128,13 +129,13 @@ class TopDownBallFinder:
             video.change_frame(1)
             current_frame = video.get_current_frame()
             ball_data = self.find_ball(current_frame, background_frame)
-            print(f"Checking frame {video.current_frame} for ball ({(time.time() - st)*1000:.2f}ms)")
+            #print(f"Checking frame {video.current_frame} for ball ({(time.time() - st)*1000:.2f}ms)")
             if ball_data:
                 # Backtrack to last frame before ball was found to start processing from there
                 video.change_frame(-(TOP_DOWN_FRAME_SKIP + 1))
-                print(f"Ball found in frame {video.current_frame}, starting processing from frame {video.current_frame - TOP_DOWN_FRAME_SKIP - 1}.")
+                #print(f"Ball found in frame {video.current_frame}, starting processing from frame {video.current_frame - TOP_DOWN_FRAME_SKIP - 1}.")
                 break
-            print(f"No ball found in frame {video.current_frame}, skipping {TOP_DOWN_FRAME_SKIP - 1} frames.")
+            #print(f"No ball found in frame {video.current_frame}, skipping {TOP_DOWN_FRAME_SKIP - 1} frames.")
 
         ball_position = BallPosition.BEFORE_FRAME
 
@@ -148,26 +149,29 @@ class TopDownBallFinder:
             if ball_data:
                 ball_data = self.find_seam(ball_data, current_frame)
             if ball_data:
-                ball_data_points.append(TrackedBallDataPoint(frame_number=video.current_frame, data=ball_data))
+                ball_data_points.append(TopDownBallDataPoint(frame_number=video.current_frame, data=ball_data))
                 cv2.imwrite(f"{top_down_tracking_folder}/frame_{video.current_frame:04d}.jpg", current_frame)
                 ball_position = BallPosition.IN_FRAME
             else:
                 if ball_position == BallPosition.IN_FRAME:
-                    continue
                     ball_position = BallPosition.AFTER_FRAME
-                    print(f"Ball lost after frame {video.current_frame}, stopping processing.")
+                    #print(f"Ball lost after frame {video.current_frame}, stopping processing.")
             et = time.time()
-            print(f"Top Down Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
+            #print(f"Top Down Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
+        
+        for point in ball_data_points:
+            print(point)
+
         return ball_data_points
 
-    def find_ball(self, frame, background_frame) -> Optional[BallData]:
+    def find_ball(self, frame, background_frame) -> Optional[TopDownBallData]:
         if frame is None or background_frame is None:
             return None
 
         if frame.shape != background_frame.shape:
             background_frame = cv2.resize(background_frame, (frame.shape[1], frame.shape[0]))
 
-        # ── Apply bounding box crop if configured ─────────────────────────────
+        # Apply bounding box crop if configured
         x_offset, y_offset = 0, 0
         bbox = _load_bounding_box("top_down")
         if bbox:
@@ -302,7 +306,7 @@ class TopDownBallFinder:
         centre_x += x_offset
         centre_y += y_offset
 
-        return BallData(
+        return TopDownBallData(
             top_left=Coord(centre_x - radius, centre_y - radius),
             bottom_right=Coord(centre_x + radius, centre_y + radius),
             centre=Coord(centre_x, centre_y),
@@ -311,7 +315,7 @@ class TopDownBallFinder:
             seam_angle=-1.0
         )
 
-    def find_seam(self, ball_data: BallData, frame) -> Optional[BallData]:
+    def find_seam(self, ball_data: TopDownBallData, frame) -> Optional[TopDownBallData]:
         x0 = max(0, ball_data.top_left.x)
         y0 = max(0, ball_data.top_left.y)
         x1 = min(frame.shape[1], ball_data.bottom_right.x)
@@ -425,8 +429,8 @@ class TopDownBallFinder:
 
 
 class SideOnBallFinder:
-    def get_ball_data(self, video: Video) -> list[TrackedBallDataPoint]:
-        ball_data_points: list[TrackedBallDataPoint] = []
+    def get_ball_data(self, video: Video) -> list[SideOnBallDataPoint]:
+        ball_data_points: list[SideOnBallDataPoint] = []
 
         while video.get_current_frame_number() < video.total_frames - 1:
             video.change_frame(SIDE_ON_FRAME_SKIP - 1)
@@ -435,12 +439,12 @@ class SideOnBallFinder:
             video.change_frame(1)
             current_frame = video.get_current_frame()
             ball_data = self.find_ball(current_frame, background_frame)
-            print(f"Checking frame {video.current_frame} for ball ({(time.time() - st)*1000:.2f}ms)")
+            #print(f"Checking frame {video.current_frame} for ball ({(time.time() - st)*1000:.2f}ms)")
             if ball_data:
                 video.change_frame(-(SIDE_ON_FRAME_SKIP + 1))
-                print(f"Ball found in frame {video.current_frame}, starting processing from frame {video.current_frame - SIDE_ON_FRAME_SKIP - 1}.")
+                #print(f"Ball found in frame {video.current_frame}, starting processing from frame {video.current_frame - SIDE_ON_FRAME_SKIP - 1}.")
                 break
-            print(f"No ball found in frame {video.current_frame}, skipping {SIDE_ON_FRAME_SKIP - 1} frames.")
+            #print(f"No ball found in frame {video.current_frame}, skipping {SIDE_ON_FRAME_SKIP - 1} frames.")
 
         ball_position = BallPosition.BEFORE_FRAME
 
@@ -451,25 +455,25 @@ class SideOnBallFinder:
             current_frame = video.get_current_frame()
             ball_data = self.find_ball(current_frame, background_frame)
             if ball_data:
-                ball_data_points.append(TrackedBallDataPoint(frame_number=video.current_frame, data=ball_data))
+                ball_data_points.append(SideOnBallDataPoint(frame_number=video.current_frame, data=ball_data))
                 cv2.imwrite(f"{side_on_tracking_folder}/frame_{video.current_frame:04d}.jpg", current_frame)
                 ball_position = BallPosition.IN_FRAME
             else:
                 if ball_position == BallPosition.IN_FRAME:
                     ball_position = BallPosition.AFTER_FRAME
-                    print(f"Ball lost after frame {video.current_frame}, stopping processing.")
+                    #print(f"Ball lost after frame {video.current_frame}, stopping processing.")
             et = time.time()
-            print(f"Side On Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
+            #print(f"Side On Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
         return ball_data_points
 
-    def find_ball(self, current_frame, background_frame) -> Optional[BallData]:
+    def find_ball(self, current_frame, background_frame) -> Optional[SideOnBallData]:
         if current_frame is None or background_frame is None:
             return None
 
         if current_frame.shape != background_frame.shape:
             background_frame = cv2.resize(background_frame, (current_frame.shape[1], current_frame.shape[0]))
 
-        # ── Apply bounding box crop if configured ─────────────────────────────
+        # Apply bounding box crop if configured
         x_offset, y_offset = 0, 0
         bbox = _load_bounding_box("side_on")
         if bbox:
@@ -478,7 +482,7 @@ class SideOnBallFinder:
 
         h, w = current_frame.shape[:2]
 
-        # ── 1. Downscale for faster processing ────────────────────────────────
+        # Downscale for faster processing
         PROCESS_WIDTH = 1280
         scale = PROCESS_WIDTH / w if w > PROCESS_WIDTH else 1.0
         if scale < 1.0:
@@ -491,7 +495,7 @@ class SideOnBallFinder:
             small_bg = background_frame
             proc_h, proc_w = h, w
 
-        # ── 2. Motion mask ────────────────────────────────────────────────────
+        # Motion mask
         blurred    = cv2.GaussianBlur(small,    (5, 5), 0)
         blurred_bg = cv2.GaussianBlur(small_bg, (5, 5), 0)
 
@@ -505,12 +509,12 @@ class SideOnBallFinder:
         motion_mask = cv2.morphologyEx(motion_mask, cv2.MORPH_CLOSE, kernel_small, iterations=2)
         motion_mask = cv2.dilate(motion_mask, kernel_small, iterations=1)
 
-        # ── 3. Colour mask ────────────────────────────────────────────────────
+        # Colour mask
         color_mask = np.zeros((proc_h, proc_w), dtype=np.uint8)
         for lower, upper in SIDE_ON_BALL_COLOR_RANGES:
             color_mask = cv2.bitwise_or(color_mask, cv2.inRange(hsv, lower, upper))
 
-        # ── 4. Combined mask ──────────────────────────────────────────────────
+        # Combined mask
         combined_mask = cv2.bitwise_and(motion_mask, color_mask)
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel_small, iterations=2)
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN,  kernel_small, iterations=1)
@@ -519,7 +523,7 @@ class SideOnBallFinder:
         cv2.imwrite(f"{side_on_tracking_folder}/color_mask.jpg",    color_mask)
         cv2.imwrite(f"{side_on_tracking_folder}/combined_mask.jpg", combined_mask)
 
-        # ── 5. Hough circle detection ─────────────────────────────────────────
+        # Hough circle detection
         grey        = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
         grey_median = cv2.medianBlur(grey, 5)
 
@@ -554,7 +558,7 @@ class SideOnBallFinder:
                 if best_circle is None or score > best_circle[3]:
                     best_circle = (x, y, radius, score)
 
-        # ── 6. Contour fallback ───────────────────────────────────────────────
+        # Contour fallback
         if best_circle is None:
             contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             candidates = []
@@ -587,7 +591,7 @@ class SideOnBallFinder:
             _, x, y, radius, _ = max(candidates, key=lambda c: c[4])
             best_circle = (int(round(x)), int(round(y)), int(round(radius)), 0.0)
 
-        # ── 7. Map from downscaled → crop-local → full-image coords ──────────
+        # Get full-image coords
         sx, sy, sr, _ = best_circle
         if scale < 1.0:
             local_x = int(round(sx / scale))
@@ -599,7 +603,7 @@ class SideOnBallFinder:
         centre_x = local_x + x_offset
         centre_y = local_y + y_offset
 
-        # ── 8. Debug output (drawn on the cropped frame at local coords) ──────
+        # Debug output
         debug_frame = current_frame.copy()
         cv2.circle(debug_frame, (local_x, local_y), radius, (0, 255, 0), DETECTION_CIRCLE_THICKNESS)
         cv2.circle(debug_frame, (local_x, local_y), 2,      (0, 0, 255), 3)
@@ -616,7 +620,7 @@ class SideOnBallFinder:
         cropped[crop_mask == 0] = 0
         cv2.imwrite(f"{side_on_tracking_folder}/cropped_ball.jpg", cropped)
 
-        return BallData(
+        return SideOnBallData(
             top_left=Coord(centre_x - radius, centre_y - radius),
             bottom_right=Coord(centre_x + radius, centre_y + radius),
             centre=Coord(centre_x, centre_y),

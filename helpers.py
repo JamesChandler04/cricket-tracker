@@ -28,7 +28,7 @@ class Coord:
         return f"({self.x}, {self.y})"
 
 @dataclass
-class BallData:
+class TopDownBallData:
     top_left: Coord
     bottom_right: Coord
     centre: Coord
@@ -47,6 +47,23 @@ class BallData:
     def calc_seam_angle(self):
         self.seam_angle = math.degrees(math.atan2(self.seam_end.y - self.seam_start.y, self.seam_end.x - self.seam_start.x))
 
+    def calc_centre(self):
+        self.centre = Coord(
+            x=(self.top_left.x + self.bottom_right.x) // 2,
+            y=(self.top_left.y + self.bottom_right.y) // 2
+        )
+
+@dataclass
+class SideOnBallData:
+    top_left: Coord
+    bottom_right: Coord
+    centre: Coord
+
+    def __str__(self):
+        return (f"BallData(top_left={self.top_left}, "
+                f"bottom_right={self.bottom_right}, "
+                f"centre={self.centre})")
+    
     def calc_centre(self):
         self.centre = Coord(
             x=(self.top_left.x + self.bottom_right.x) // 2,

@@ -2,4 +2,5 @@
 *.xlsx
 *.pdf
 *.jpg
+*.npz
 __pycache__

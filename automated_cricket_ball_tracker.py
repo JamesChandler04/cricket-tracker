@@ -11,6 +11,7 @@ from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter, QPen, QColor
 import cv2
 import yaml
 import automations
+import physics_engine
 from log_bridge import bridge
 
 CONFIG_PATH = "config.yml"
@@ -49,7 +50,7 @@ def get_bounding_box(view: str):
     return xs, ys, xe, ye
 
 
-# ── Bounding Box Dialog ───────────────────────────────────────────────────────
+# Bounding Box Dialog
 
 class SelectableImageLabel(QLabel):
     """QLabel that lets the user draw a rectangle by click-and-drag."""
@@ -181,7 +182,7 @@ class BoundingBoxDialog(QDialog):
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
 
-    # ── file loading ──────────────────────────────────────────────────────────
+    # File loading
 
     def _load_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -235,7 +236,7 @@ class BoundingBoxDialog(QDialog):
         super().resizeEvent(event)
         self._update_display()
 
-    # ── selection ─────────────────────────────────────────────────────────────
+    # Selection
 
     def _clear_selection(self):
         self.img_label.clear_selection()
@@ -276,8 +277,6 @@ class BoundingBoxDialog(QDialog):
 
         return QRect(QPoint(x1, y1), QPoint(x2, y2)).normalized()
 
-    # ── confirm ───────────────────────────────────────────────────────────────
-
     def _confirm(self):
         sel = self.img_label.selection_rect
         if sel.isNull() or sel.width() < 5 or sel.height() < 5:
@@ -297,9 +296,6 @@ class BoundingBoxDialog(QDialog):
             orig_rect.right(), orig_rect.bottom(),
         )
         self.accept()
-
-
-# ── Worker ────────────────────────────────────────────────────────────────────
 
 class TrackingWorker(QThread):
     finished = pyqtSignal(list, list)  # top_down_frames, side_on_frames
@@ -326,6 +322,8 @@ class TrackingWorker(QThread):
                 else:
                     os.makedirs(folder, exist_ok=True)
 
+            # Run tracking software
+
             top_down_video = automations.Video(self.top_down_path)
             side_on_video = automations.Video(self.side_on_path)
 
@@ -348,12 +346,23 @@ class TrackingWorker(QThread):
             top_down_frames = sorted(glob.glob(f"{automations.top_down_tracking_folder}/frame_*.jpg"))
             side_on_frames  = sorted(glob.glob(f"{automations.side_on_tracking_folder}/frame_*.jpg"))
 
+            for data in top_down_ball_data:
+                print(f"Top Down - Frame {data.frame_number}: Ball Position = {data.data.centre}, Seam Angle = {data.data.seam_angle:.2f} degrees")
+            
+            # Run physics software
+
+            top_down_phys_engine = physics_engine.TopDownPhysicsEngine()
+            initial_velocity = top_down_phys_engine.calculate_velocity(top_down_ball_data, top_down_video.fps)
+            print(f"Initial velocity calculated from top down video: {initial_velocity:.2f} km/h")
+
+            seam_angle = top_down_phys_engine.calculate_seam_angle(top_down_ball_data)
+            print(f"Seam angle calculated from top down video: {seam_angle:.2f} degrees")
+
+            side_on_phys_engine = physics_engine.SideOnPhysicsEngine()
+            swingless_trajectory = side_on_phys_engine.calculate_swingless_trajectory(side_on_ball_data, side_on_video.fps)
             self.finished.emit(top_down_frames, side_on_frames)
         except Exception as e:
             self.error.emit(str(e))
-
-
-# ── Frame Viewer ──────────────────────────────────────────────────────────────
 
 class FrameViewer(QWidget):
     """A labelled image viewer with prev/next navigation."""
@@ -458,9 +467,6 @@ class FrameViewer(QWidget):
         if self._frames:
             self._show_current()
 
-
-# ── Main Window ───────────────────────────────────────────────────────────────
-
 class Application(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -496,7 +502,7 @@ class Application(QMainWindow):
         title.setFont(title_font)
         main_layout.addWidget(title)
 
-        # ── File pickers + bounding box buttons ──────────────────────────────
+        # File pickers + bounding box buttons
         # Top down row
         top_down_video_layout = QHBoxLayout()
         top_down_video_label = QLabel("Top Down View:")
@@ -543,7 +549,7 @@ class Application(QMainWindow):
         side_on_video_layout.addWidget(self.side_on_bb_btn)
         main_layout.addLayout(side_on_video_layout)
 
-        # ── Middle: log + frame viewers ───────────────────────────────────────
+        # Middle: log + frame viewers
         middle_layout = QHBoxLayout()
         middle_layout.setSpacing(16)
 
@@ -612,7 +618,7 @@ class Application(QMainWindow):
 
         central_widget.setLayout(main_layout)
 
-    # ── Bounding box helpers ──────────────────────────────────────────────────
+    # Bounding box helpers
 
     def _style_bb_button(self, btn: QPushButton, view_key: str):
         """Green tint if a bounding box is already saved, neutral otherwise."""
@@ -640,7 +646,7 @@ class Application(QMainWindow):
                 self.append_log(
                     f"{label} search region saved: ({xs}, {ys}) → ({xe}, {ye})")
 
-    # ── File selection ────────────────────────────────────────────────────────
+    # File selection
 
     def select_top_down_video(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -662,7 +668,7 @@ class Application(QMainWindow):
             self.side_on_video_display.setStyleSheet(
                 "background-color: white; padding: 10px; border: 1px solid #ccc;")
 
-    # ── Tracking ──────────────────────────────────────────────────────────────
+    # Tracking
 
     def start_tracking(self):
         if not self.top_down_video_path or not self.side_on_video_path:
@@ -700,6 +706,16 @@ class Application(QMainWindow):
         self.append_log(f"\nERROR: {message}")
         self.start_btn.setEnabled(True)
         self.start_btn.setText("Start Tracking")
+
+    # Physics Calculation
+
+    def start_physics_calculation(self):
+        self.append_log("\nStarting physics calculation…")
+        try:
+            physics_engine.PhysicsEngine().calculate_velocity(top_down_frames, self.top_down_video.fps)
+            self.append_log("Physics calculation completed successfully.")
+        except Exception as e:
+            self.append_log(f"ERROR during physics calculation: {e}")
 
     def append_log(self, text: str):
         scrollbar = self.log_display.verticalScrollBar()

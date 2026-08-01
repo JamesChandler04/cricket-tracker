@@ -1,18 +1,18 @@
 bounding_boxes:
   side_on:
     bottom_right:
-      x: 1384
-      y: 801
+      x: 1973
+      y: 1097
     top_left:
-      x: 1340
-      y: 765
+      x: 1942
+      y: 1018
   top_down:
     bottom_right:
       x: 3835
-      y: 1478
+      y: 1434
     top_left:
-      x: 1844
-      y: 433
+      x: 1840
+      y: 513
 raw_output:
   folder: output_folder
   save_csv: true
