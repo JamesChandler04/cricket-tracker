@@ -18,6 +18,7 @@ class Key(Enum):
     D = ord('D')
     f = ord('f')
     b = ord('b')
+    z = ord('z')
 
 @dataclass
 class Coord:

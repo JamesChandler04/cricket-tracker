@@ -19,6 +19,9 @@ from helpers import Key, Video, Config
 if not typing.TYPE_CHECKING:
     import xlsxwriter # Used when saving to excel
 
+ZOOM_FACTOR = 10
+ZOOM_INTERPOLATION = cv2.INTER_NEAREST
+
 class CricketBallTracker:
     def __init__(self):
         self.frame_positions = []  # (frame_number, x_px, y_px, time_s) for main view
@@ -41,6 +44,11 @@ class CricketBallTracker:
         self.first_frame_main = None
         self.side_frame_for_main_frame1 = None
 
+        self.side_zoom_active = False
+        self.side_zoom_centre = None      # (x, y) in raw frame coordinates
+        self.side_mouse_pos = None        # last known mouse position, in raw frame coordinates
+        self._side_zoom_transform = None  # (x0, y0, scale_x, scale_y, crop_w, crop_h)
+
         self.background_frame_top = None
 
         self.drawers = drawers.Drawers()
@@ -52,6 +60,87 @@ class CricketBallTracker:
 
         with open("config.yml", "r") as f:
             self.config_file = yaml.safe_load(f)
+
+    def _side_view_to_frame_coords(self, x, y):
+        """
+        Map a coordinate from the displayed side-on view back to raw frame pixels.
+
+        When zoom is off this is the identity. When zoom is on it inverts the
+        crop-and-resize exactly, so a click always resolves to the same raw pixel
+        it would have resolved to unzoomed.
+        """
+        if not self.side_zoom_active or self._side_zoom_transform is None:
+            return int(x), int(y)
+
+        x0, y0, scale_x, scale_y, crop_w, crop_h = self._side_zoom_transform
+        # cv2.resize with INTER_NEAREST maps dst pixel j -> src pixel floor(j / scale),
+        # so flooring here is the exact inverse of what is on screen.
+        col = int(max(0.0, x) / scale_x)
+        row = int(max(0.0, y) / scale_y)
+        col = min(col, crop_w - 1)
+        row = min(row, crop_h - 1)
+        return x0 + col, y0 + row
+
+    def _frame_to_side_view_coords(self, x, y):
+        """Map raw frame pixels to the displayed side-on view (for drawing overlays)."""
+        if not self.side_zoom_active or self._side_zoom_transform is None:
+            return int(x), int(y)
+
+        x0, y0, scale_x, scale_y, _crop_w, _crop_h = self._side_zoom_transform
+        # +0.5 puts the marker in the centre of the magnified pixel block.
+        return int(round((x - x0 + 0.5) * scale_x)), int(round((y - y0 + 0.5) * scale_y))
+
+    def _apply_side_zoom(self, frame):
+        """Crop a ZOOM_FACTOR-smaller region around the zoom centre and blow it back up to full size."""
+        height, width = frame.shape[:2]
+        crop_w = max(1, int(round(width / ZOOM_FACTOR)))
+        crop_h = max(1, int(round(height / ZOOM_FACTOR)))
+
+        centre_x, centre_y = self.side_zoom_centre
+        x0 = min(max(int(centre_x) - crop_w // 2, 0), max(width - crop_w, 0))
+        y0 = min(max(int(centre_y) - crop_h // 2, 0), max(height - crop_h, 0))
+
+        crop = frame[y0:y0 + crop_h, x0:x0 + crop_w]
+        zoomed = cv2.resize(crop, (width, height), interpolation=ZOOM_INTERPOLATION)
+
+        # Store the actual scales rather than ZOOM_FACTOR itself: width / crop_w is
+        # only exactly ZOOM_FACTOR when the frame size divides evenly.
+        self._side_zoom_transform = (x0, y0, width / crop_w, height / crop_h, crop_w, crop_h)
+        return zoomed
+
+    def _side_overlays_for_display(self):
+        """Return (positions, calibration) with coordinates mapped into display space."""
+        if not self.side_zoom_active or self._side_zoom_transform is None:
+            return self.side_positions, self.side_calibration
+
+        positions = []
+        for frame_num, x, z, t in self.side_positions:
+            vx, vz = self._frame_to_side_view_coords(x, z)
+            positions.append((frame_num, vx, vz, t))
+
+        calibration = None
+        if self.side_calibration:
+            calibration = (
+                self.side_calibration[0],
+                [self._frame_to_side_view_coords(x, z) for x, z in self.side_calibration[1]],
+            )
+        return positions, calibration
+
+    def _toggle_side_zoom(self):
+        if self.side_zoom_active:
+            self.side_zoom_active = False
+            self.side_zoom_centre = None
+            self._side_zoom_transform = None
+            print("Side view zoom off.")
+            return
+
+        if self.side_mouse_pos is None:
+            print("Move the mouse over the side view before pressing 'Z'.")
+            return
+
+        self.side_zoom_active = True
+        self.side_zoom_centre = self.side_mouse_pos
+        print(f"Side view zoom on: {ZOOM_FACTOR}x around ({self.side_zoom_centre[0]}, {self.side_zoom_centre[1]}). Press 'Z' again to zoom out.")
 
     # ---------------------- Mouse ---------------------- #
     def top_down_mouse_callback(self, event, x, y, flags, param):
@@ -84,8 +173,16 @@ class CricketBallTracker:
                     print(f"Seam angle tracking stopped for frame {self.top_down_video.get_current_frame_number()}. Angle: {self.seam_measurements[-1][1]:.2f} degrees")
 
     def side_on_mouse_callback(self, event, x, y, flags, param):
-        print(f"Clicked at point ({x}, {y}).")
+        # Everything below works in raw frame coordinates, regardless of zoom state.
+        x, y = self._side_view_to_frame_coords(x, y)
+
+        if event == cv2.EVENT_MOUSEMOVE:
+            self.side_mouse_pos = (x, y)
+            return
+
         if event == cv2.EVENT_LBUTTONDOWN:
+            self.side_mouse_pos = (x, y)
+            print(f"Clicked at point ({x}, {y}).")
             if self.side_calibration_active:
                 if self.side_frame_for_main_frame1 is None:
                     print(f"Error: Track the first ball position before calibrating.")
@@ -756,6 +853,7 @@ class CricketBallTracker:
         print("- SPACE: Start/Stop Ball Tracking Mode")
         print("- a/d or A/D: Move frame back/forward (capitals for 10 frame jumps)")
         print("- Click: Mark calibration points or ball position (X, Z)")
+        print(f"- Z: Toggle {ZOOM_FACTOR}x zoom centred on the mouse (press again to zoom out)")
         print("- S: Save data to Excel")
         print("- R: Reset side view tracking and calibration")
         print("- Q or ESC: Quit")
@@ -764,7 +862,13 @@ class CricketBallTracker:
         while True:
             frame = self.side_on_video.get_current_frame()
 
-            self.drawers.draw_side_trajectory(frame, self.side_positions, self.side_on_video.current_frame, self.side_calibration)
+            # Zoom is applied to the raw frame first, then overlays and HUD text are
+            # drawn on top at normal size so they stay readable at any ZOOM_FACTOR.
+            if self.side_zoom_active and self.side_zoom_centre is not None and frame is not None:
+                frame = self._apply_side_zoom(frame)
+            display_positions, display_calibration = self._side_overlays_for_display()
+
+            self.drawers.draw_side_trajectory(frame, display_positions, self.side_on_video.current_frame, display_calibration)
 
             if self.side_calibration_active:
                 points = len(self.side_calibration[1]) if self.side_calibration else 0
@@ -779,7 +883,9 @@ class CricketBallTracker:
             self.drawers.draw_text(frame, f"Side Points: {len(self.side_positions)}", (10, 110), font_scale=0.9)
             self.drawers.draw_text(frame, f"Main Frame 1 = Side Frame {'Not set' if self.side_frame_for_main_frame1 is None else self.side_frame_for_main_frame1}", (10, 140), font_scale=0.9)
             self.drawers.draw_text(frame, f"Focal Length: {'{:.2f} px'.format(self.side_focal_length_px) if self.side_focal_length_px is not None else 'Not set'}", (10, 170), font_scale=0.9)
-            self.drawers.draw_text(frame, "S = Save Excel", (10, 200), font_scale=0.9)
+            zoom_status = f"{ZOOM_FACTOR}x @ ({self.side_zoom_centre[0]}, {self.side_zoom_centre[1]})" if self.side_zoom_active and self.side_zoom_centre is not None else "Off"
+            self.drawers.draw_text(frame, f"Zoom: {zoom_status}  (Z to toggle at mouse)", (10, 200), font_scale=0.9)
+            self.drawers.draw_text(frame, "S = Save Excel", (10, 230), font_scale=0.9)
 
             cv2.imshow(self.window_name_side, frame)
             key_code = int(cv2.waitKey(10) & 0xFF)
@@ -820,10 +926,18 @@ class CricketBallTracker:
                     self.side_on_video.change_frame(-10)
                 case Key.D:
                     self.side_on_video.change_frame(10)
+                case Key.z:
+                    self._toggle_side_zoom()
                 case Key.s:
                     self.save_to_excel()
                 case Key.o:
                     self.side_on_video.rotate()
+                    # Frame dimensions change on rotation, so the old zoom centre is meaningless.
+                    if self.side_zoom_active:
+                        self.side_zoom_active = False
+                        self.side_zoom_centre = None
+                        self._side_zoom_transform = None
+                        print("Side view zoom off (video rotated).")
                     print(f"Side view rotated to {self.side_on_video.rotation} degrees")
                 case Key.r:
                     self.side_positions = []
