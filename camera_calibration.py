@@ -5,14 +5,11 @@ import cv2
 
 from helpers import Coord
 
-# ---------------------------------------------------------------------------
-# CONFIG - edit these for your rig
-# ---------------------------------------------------------------------------
 MAX_DISPLAY_WIDTH = 1400
 MAX_DISPLAY_HEIGHT = 900
 
 # Distance in metres from release to each ring's vertical face (4 rings from 3 chained cubes)
-RING_FORWARD_DISTANCES_M = [4.2, 7.2, 10.2, 13.2]
+RING_FORWARD_DISTANCES_M = [0, 3, 6, 9]
 TUNNEL_HALF_WIDTH_M = 1.5
 TUNNEL_HALF_HEIGHT_M = 1.5
 
@@ -20,9 +17,6 @@ CALIBRATION_OUTPUT_PATH = "camera_calibration.npz"
 CORNER_LABELS = ["top_left", "top_right", "bottom_right", "bottom_left"]
 
 
-# ---------------------------------------------------------------------------
-# Camera resectioning (Direct Linear Transform)
-# ---------------------------------------------------------------------------
 def resection_camera(
     ring_forward_distances_m: list[float],
     ring_corners_px: list[tuple[Coord, Coord, Coord, Coord]],
@@ -77,9 +71,6 @@ def load_calibration(path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return data["K_inv"], data["R_T"], data["t_std"]
 
 
-# ---------------------------------------------------------------------------
-# Click tool
-# ---------------------------------------------------------------------------
 def main(video_path: str):
     num_rings = len(RING_FORWARD_DISTANCES_M)
     num_points_needed = num_rings * 4

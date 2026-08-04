@@ -9,3 +9,4 @@ pytest
 types-PyYAML
 pyqt5
 PyYAML
+matplotlib
