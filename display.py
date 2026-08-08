@@ -21,7 +21,17 @@ class Display:
             raise ValueError("No top down view video path provided.")
 
         rel_path = os.path.relpath(abs_path, os.path.dirname(__file__))
-        return Video(rel_path)
+
+        start_frame_str = input("Enter the starting frame number for the main video (default 0): ")
+        if start_frame_str.strip() == "":
+            start_frame = 0
+        else:
+            start_frame = int(start_frame_str)
+
+        video = Video(rel_path)
+        video.current_frame = start_frame
+
+        return video
 
     def load_side_video(self) -> Video:
         print("Please select the side view video file (side view).")
@@ -39,4 +49,14 @@ class Display:
             raise ValueError("No side on view video path provided.")
 
         rel_path = os.path.relpath(abs_path, os.path.dirname(__file__))
-        return Video(rel_path)
+
+        start_frame_str = input("Enter the starting frame number for the side video (default 0): ")
+        if start_frame_str.strip() == "":
+            start_frame = 0
+        else:
+            start_frame = int(start_frame_str)
+
+        video = Video(rel_path)
+        video.current_frame = start_frame
+
+        return video

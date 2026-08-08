@@ -27,7 +27,7 @@ LATERAL_DRAG_COEFFICIENT = 24.377
 # relative swing on future deliveries.
 # ---------------------------------------------------------------------------
 REFERENCE_FPS = 119.88
-REFERENCE_INITIAL_SPEED_KMH = 95.32
+REFERENCE_INITIAL_SPEED_KMH = 107
 REFERENCE_DRAG_COEFFICIENT = 0.0092
 REFERENCE_CALIBRATION_PATH = "reference_swingless_calibration.npz"
 

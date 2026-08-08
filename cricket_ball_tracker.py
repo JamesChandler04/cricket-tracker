@@ -163,7 +163,7 @@ class CricketBallTracker:
                     self.first_frame_main = self.top_down_video.get_current_frame_number()
                     print(f"Main view Frame 1 set to raw frame {self.first_frame_main}")
                 self._add_or_replace_point_for_frame(self.top_down_video.get_current_frame_number(), x, y, timestamp, is_side=False)
-                print(f"Main View - Frame {self.top_down_video.get_current_frame_number()}: Ball at (x={x}, y={y}) - Time: {timestamp:.3f}s")
+                print(f"Main View - Frame {self.top_down_video.get_current_frame_number()}: Ball at (x={x}, y={y}) - Time: {timestamp:.5f}s")
             elif self.seam_angle_active and self.meters_per_pixel is not None:
                 self.seam_points.append((x, y))
                 print(f"Seam point added: ({x}, {y})")
