@@ -4,4 +4,6 @@
 *.jpg
 *.png
 *.npz
+*.csv
+*.yaml
 __pycache__

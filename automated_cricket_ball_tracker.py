@@ -11,7 +11,7 @@ from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter, QPen, QColor
 import cv2
 import yaml
 import automations
-import physics_engine
+import old_physics_engine
 from log_bridge import bridge
 
 CONFIG_PATH = "config.yml"
@@ -351,14 +351,14 @@ class TrackingWorker(QThread):
             
             # Run physics software
 
-            top_down_phys_engine = physics_engine.TopDownPhysicsEngine()
+            top_down_phys_engine = old_physics_engine.TopDownPhysicsEngine()
             initial_velocity = top_down_phys_engine.calculate_velocity(top_down_ball_data, top_down_video.fps)
             print(f"Initial velocity calculated from top down video: {initial_velocity:.2f} km/h")
 
             seam_angle = top_down_phys_engine.calculate_seam_angle(top_down_ball_data)
             print(f"Seam angle calculated from top down video: {seam_angle:.2f} degrees")
 
-            side_on_phys_engine = physics_engine.SideOnPhysicsEngine()
+            side_on_phys_engine = old_physics_engine.SideOnPhysicsEngine()
             swingless_trajectory = side_on_phys_engine.calculate_swingless_trajectory(side_on_ball_data, side_on_video.fps)
             self.finished.emit(top_down_frames, side_on_frames)
         except Exception as e:
@@ -712,7 +712,7 @@ class Application(QMainWindow):
     def start_physics_calculation(self):
         self.append_log("\nStarting physics calculation…")
         try:
-            physics_engine.PhysicsEngine().calculate_velocity(top_down_frames, self.top_down_video.fps)
+            old_physics_engine.PhysicsEngine().calculate_velocity(top_down_frames, self.top_down_video.fps)
             self.append_log("Physics calculation completed successfully.")
         except Exception as e:
             self.append_log(f"ERROR during physics calculation: {e}")
