@@ -175,3 +175,13 @@ class Config:
         except Exception as e:
             print(f"Error loading config file: {e}")
             return {}
+
+@dataclass
+class TopDownBallDataPoint:
+    frame_number: int
+    data: TopDownBallData
+
+@dataclass
+class SideOnBallDataPoint:
+    frame_number: int
+    data: SideOnBallData

@@ -100,6 +100,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 import numpy as np
 import yaml
 
@@ -676,8 +679,6 @@ class SideOnPhysicsEngine:
 
         Z is negated for display so that up is up on screen.
         """
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.mplot3d import Axes3D
 
         distances = self.ring_distances if distances is None else distances
         traj = result.trajectory

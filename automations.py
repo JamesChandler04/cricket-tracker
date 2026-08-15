@@ -4,7 +4,7 @@ import os
 import math
 import time
 from typing import Optional
-from helpers import TopDownBallData, SideOnBallData, Coord, Video
+from helpers import TopDownBallData, TopDownBallDataPoint, SideOnBallData, SideOnBallDataPoint, Coord, Video
 import sys
 from enum import Enum
 from dataclasses import dataclass
@@ -100,17 +100,6 @@ def _apply_bounding_box(frame, background_frame, bbox):
     xe = max(xs + 1, min(xe, w))
     ye = max(ys + 1, min(ye, h))
     return frame[ys:ye, xs:xe], background_frame[ys:ye, xs:xe], xs, ys
-
-
-@dataclass
-class TopDownBallDataPoint:
-    frame_number: int
-    data: TopDownBallData
-
-@dataclass
-class SideOnBallDataPoint:
-    frame_number: int
-    data: SideOnBallData
 
 class BallPosition(Enum):
     BEFORE_FRAME = 0
@@ -623,10 +612,7 @@ class SideOnBallFinder:
         return SideOnBallData(
             top_left=Coord(centre_x - radius, centre_y - radius),
             bottom_right=Coord(centre_x + radius, centre_y + radius),
-            centre=Coord(centre_x, centre_y),
-            seam_start=Coord(-1, -1),
-            seam_end=Coord(-1, -1),
-            seam_angle=-1.0,
+            centre=Coord(centre_x, centre_y)
         )
 
 
