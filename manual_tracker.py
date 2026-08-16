@@ -8,6 +8,7 @@ import display
 import calculators
 from helpers import Key, TopDownBallData, TopDownBallDataPoint, SideOnBallData, SideOnBallDataPoint, Coord, Video
 from top_down_physics_engine import SelectionType, TopDownPhysicsEngine
+from side_on_physics_engine import TrackedPoint
 
 
 ZOOM_FACTOR = 10
@@ -363,7 +364,7 @@ class SideOnTracker:
                 if not self.side_positions and self.side_frame_for_main_frame1 is None:
                     self.side_frame_for_main_frame1 = self.side_on_video.get_current_frame_number()
                     print(f"Side view Frame 1 set to raw frame {self.side_frame_for_main_frame1}, corresponding to main view Frame 1")
-                self._add_or_replace_point_for_frame(self.side_on_video.get_current_frame_number(), x, y, timestamp, is_side=True)
+                self._add_or_replace_point_for_frame(self.side_on_video.get_current_frame_number(), x, y, timestamp)
                 print(f"Side View - Frame {self.side_on_video.get_current_frame_number()}: Ball at (x={x}, z={y}) - Time: {timestamp:.3f}s")
 
     def run(self):
@@ -456,7 +457,7 @@ class SideOnTracker:
                 case Key.z:
                     self._toggle_side_zoom()
                 case Key.s:
-                    return []
+                    return
                 case Key.o:
                     self.side_on_video.rotate()
                     # Frame dimensions change on rotation, so the old zoom centre is meaningless.
@@ -473,3 +474,15 @@ class SideOnTracker:
                     self.side_frame_for_main_frame1 = None
                     print("Side view tracking, calibration, and frame mapping reset.")
 
+    def get_side_on_points(self) -> list[TrackedPoint]:
+        self.run()
+
+        # points_list is a list of (frame, x, y, time)
+        clicked_points_list = self.side_positions.copy()
+
+        points_list = []
+
+        for p in clicked_points_list:
+            points_list.append(TrackedPoint(p[0], p[1], p[2]))
+
+        return points_list

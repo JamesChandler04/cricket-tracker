@@ -144,6 +144,9 @@ class TrackedPoint:
     u: float
     v: float
 
+    def __str__(self):
+        return f"Frame: {self.frame} u: {self.u} v: {self.v}"
+
 
 @dataclass(frozen=True)
 class Calibration:

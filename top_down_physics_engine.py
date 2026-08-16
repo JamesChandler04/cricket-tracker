@@ -115,11 +115,12 @@ class TopDownPhysicsEngine:
                 return curr_point.data.seam_angle - ball_direction
         return None # If no seam angle on any points
 
-    def save_top_down_analysis(save_directory, velocity, seam_angle, fps, point_count):
+    def save_top_down_analysis(save_directory, file_name, velocity, seam_angle, fps, point_count):
         """Write the top-down velocity and seam angle to a YAML file in save_directory."""
         directory = Path(save_directory)
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / "top_down_analysis.yaml"
+        full_file_name = file_name + ".yaml"
+        path = directory / full_file_name
 
         with open(path, "w") as handle:
             yaml.safe_dump({
