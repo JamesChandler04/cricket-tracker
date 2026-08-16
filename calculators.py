@@ -45,8 +45,6 @@ class Calculators:
         return side_calibration, side_focal_length_px
     
     def _calculate_seam_angle(self, seam_points, seam_measurements, current_frame):
-        if len(seam_points) != 2:
-            return seam_measurements, seam_points
         (x1, y1), (x2, y2) = seam_points
         dx = x2 - x1
         dy = y2 - y1

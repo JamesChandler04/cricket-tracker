@@ -25,17 +25,35 @@ class Coord:
     x: int
     y: int
 
+    def distance_to(self, other: 'Coord') -> float:
+        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
+
     def __str__(self):
         return f"({self.x}, {self.y})"
+    
+    def __add__(self, other: 'Coord'):
+        return Coord(self.x + other.x, self.y + other.y)
+
+    def __sub__(self, other: 'Coord'):
+        return Coord(self.x - other.x, self.y - other.y)
+
+    def __mul__(self, scalar: float):
+        return Coord(int(self.x * scalar), int(self.y * scalar))
+
+    def __truediv__(self, scalar: float):
+        return Coord(int(self.x / scalar), int(self.y / scalar))
+
+    def __floor__(self, scalar: float):
+        return Coord(int(self.x / scalar), int(self.y / scalar))    
 
 @dataclass
 class TopDownBallData:
-    top_left: Coord
-    bottom_right: Coord
-    centre: Coord
-    seam_start: Coord
-    seam_end: Coord
-    seam_angle: float
+    top_left: Coord | None
+    bottom_right: Coord | None
+    centre: Coord | None
+    seam_start: Coord | None
+    seam_end: Coord | None
+    seam_angle: float | None
 
     def __str__(self):
         return (f"BallData(top_left={self.top_left}, "
@@ -43,7 +61,7 @@ class TopDownBallData:
                 f"centre={self.centre}, "
                 f"seam_start={self.seam_start}, "
                 f"seam_end={self.seam_end}, "
-                f"seam_angle={self.seam_angle:.2f} degrees)")
+                f"seam_angle={self.seam_angle} degrees)")
 
     def calc_seam_angle(self):
         self.seam_angle = math.degrees(math.atan2(self.seam_end.y - self.seam_start.y, self.seam_end.x - self.seam_start.x))
@@ -181,7 +199,13 @@ class TopDownBallDataPoint:
     frame_number: int
     data: TopDownBallData
 
+    def __str__(self):
+        return f"Frame {self.frame_number}: {self.data}"
+
 @dataclass
 class SideOnBallDataPoint:
     frame_number: int
     data: SideOnBallData
+
+    def __str__(self):
+        return f"Frame {self.frame_number}: {self.data}"

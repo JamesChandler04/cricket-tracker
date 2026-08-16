@@ -3,11 +3,14 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from enum import Enum
+import yaml
+from pathlib import Path
 
 from helpers import TopDownBallData, SideOnBallData, SideOnBallData, Coord
 from automations import TopDownBallDataPoint, SideOnBallDataPoint, SideOnBallData, Coord
 
-
+SAVE_DIRECTORY = "output_folder/demo_delivery"
 BALL_METRE_DIAMETER = 0.072 # Ball diameter in metres
 GRAVITY = 9.81
 FRAMES_FIT_SEAMLESS = 15 # Number of early frames used to fit the swingless trajectory's initial velocity
@@ -42,41 +45,91 @@ REFERENCE_SIDE_ON_DATA = [
     (463,2048,852),(464,2052,855),
 ]
 
+class SelectionType(Enum):
+    MIN = 1
+    MEAN = 2
+    MAX = 3
 
 class TopDownPhysicsEngine:
-    def calculate_velocity(self, top_down_points: list[TopDownBallDataPoint], fps: float) -> float:
+    def calculate_velocity(self, top_down_points: list[TopDownBallDataPoint], fps: float, type: SelectionType) -> float:
         '''
         Turns list of top down points to velocities (km/h).
         Uses average velocity of all points.
+        When using manual tracking:
+        - Some points will have top-left and bottom-right but most wont.
+        - Only one point will have seam start and seam end.
         '''
         velocities = []
+        ball_pixel_diameter = None
         for i in range(1, len(top_down_points)):
             prev_point = top_down_points[i - 1]
             curr_point = top_down_points[i]
 
-            pixel_distance = ((curr_point.data.centre.x - prev_point.data.centre.x) ** 2 + (curr_point.data.centre.y - prev_point.data.centre.y) ** 2) ** 0.5
+            if prev_point.data.top_left is not None and prev_point.data.bottom_right is not None:
+                ball_pixel_diameter = prev_point.data.top_left.distance_to(prev_point.data.bottom_right)
+
+            if not ball_pixel_diameter:
+                raise ValueError("First chosen top down frame does not have corresponding diameter data.")
+
+            if not curr_point.data.centre or not prev_point.data.centre:
+                continue # Skip if the either frame doesn't have any location data
+
+            pixel_distance = prev_point.data.centre.distance_to(curr_point.data.centre)
 
             time_diff = (curr_point.frame_number - prev_point.frame_number) / fps
-
-            ball_pixel_diameter = ((prev_point.data.bottom_right.x - prev_point.data.top_left.x) + (prev_point.data.bottom_right.y - prev_point.data.top_left.y)) / 2
-
+            
             metre_distance = (pixel_distance / ball_pixel_diameter) * BALL_METRE_DIAMETER
 
             metre_per_second = metre_distance / time_diff if time_diff > 0 else 0
             kmh = metre_per_second * 3.6
             velocities.append(kmh)
-        ave_velocity = sum(velocities) / len(velocities) if velocities else 0
-        return ave_velocity
 
-    def calculate_seam_angle(self, top_down_points: list[TopDownBallDataPoint]) -> float:
+        if len(velocities) == 0:
+            raise ValueError("No valid velocity data could be calculated from the provided top down points.")
+        
+        if type == SelectionType.MIN:
+            return min(velocities)
+        if type == SelectionType.MAX:
+            return max(velocities)
+        # SelectionType.MEAN
+        return sum(velocities) / len(velocities)
+
+    def calculate_seam_angle(self, top_down_points: list[TopDownBallDataPoint]) -> float | None:
         '''
         Turns list of top down points to seam angles (degrees).
+        Calculates seam angle relative to the ball's direction.
         Uses first seam angle found.
+        Returns none if no seam angles are recorded.
         '''
-        for point in top_down_points:
-            if point.data.seam_angle != -1:
-                return point.data.seam_angle
-        return -1 # If no seam angle on any points
+        for point_idx in range(len(top_down_points) - 1):
+            curr_point = top_down_points[point_idx]
+            next_point = top_down_points[point_idx + 1]
+
+            if curr_point.data.centre and next_point.data.centre:
+                ball_direction = math.degrees(math.atan2(next_point.data.centre.y - curr_point.data.centre.y, next_point.data.centre.x - curr_point.data.centre.x))
+
+            if curr_point.data.seam_angle:
+                print(f"Ball direction is {ball_direction}")
+                print(f"Raw seam angle is {curr_point.data.seam_angle}")
+
+                return curr_point.data.seam_angle - ball_direction
+        return None # If no seam angle on any points
+
+    def save_top_down_analysis(save_directory, velocity, seam_angle, fps, point_count):
+        """Write the top-down velocity and seam angle to a YAML file in save_directory."""
+        directory = Path(save_directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / "top_down_analysis.yaml"
+
+        with open(path, "w") as handle:
+            yaml.safe_dump({
+                "velocity_km_h": float(velocity),
+                "seam_angle_deg": None if seam_angle is None else float(seam_angle),
+                "fps": float(fps),
+                "point_count": point_count,
+            }, handle, sort_keys=False)
+
+        return str(path)
 
 
 class SideOnPhysicsEngine:
@@ -514,62 +567,3 @@ class SideOnPhysicsEngine:
         data = np.load(REFERENCE_CALIBRATION_PATH)
         return data["K_inv"], data["R_T"], data["t_std"]
 
-
-# --- Parameters for this delivery ---
-FPS = 239.76
-INITIAL_SPEED_KMH = 136.75  # average of 5 segments (133.32-138.79 km/h, tight spread)
-DRAG_COEFFICIENT = 0.0092
-
-# Same resolution (2704x1520) and fps (239.76) as your earlier corrected-calibration
-# delivery - if this is the same rig/session, reuse camera_calibration.npz. If it's
-# a different session, load the matching calibration file instead.
-import numpy as np
-cal = np.load("camera_calibration.npz")
-K_inv, R_T, t_std = cal["K_inv"], cal["R_T"], cal["t_std"]
-
-# --- Side-on tracked points (54 frames, 724-777) ---
-side_on_points = [
-    SideOnBallDataPoint(
-        frame_number=fn,
-        data=SideOnBallData(
-            top_left=Coord(x=x - 15, y=z - 15),
-            bottom_right=Coord(x=x + 15, y=z + 15),
-            centre=Coord(x=x, y=z),
-        ),
-    )
-    for fn, x, z in [
-        (724, 895, 386), (725, 908, 389), (726, 919, 392), (727, 930, 394), (728, 939, 396),
-        (729, 949, 399), (730, 958, 401), (731, 966, 404), (732, 974, 405), (733, 982, 408),
-        (734, 988, 410), (735, 995, 411), (736, 1003, 413), (737, 1008, 415), (738, 1013, 417),
-        (739, 1019, 419), (740, 1023, 420), (741, 1029, 422), (742, 1033, 423), (743, 1038, 424),
-        (744, 1042, 426), (745, 1046, 428), (746, 1050, 429), (747, 1054, 430), (748, 1058, 432),
-        (749, 1061, 433), (750, 1065, 434), (751, 1069, 434), (752, 1071, 436), (753, 1074, 438),
-        (754, 1078, 439), (755, 1081, 441), (756, 1083, 442), (757, 1086, 443), (758, 1088, 444),
-        (759, 1091, 446), (760, 1093, 447), (761, 1095, 448), (762, 1098, 449), (763, 1100, 450),
-        (764, 1102, 451), (765, 1104, 452), (766, 1106, 453), (767, 1108, 453), (768, 1109, 454),
-        (769, 1111, 455), (770, 1113, 457), (771, 1115, 458), (772, 1117, 459), (773, 1119, 460),
-        (774, 1120, 461), (775, 1122, 462), (776, 1123, 463), (777, 1125, 464),
-    ]
-]
-
-# --- Run it ---
-engine = SideOnPhysicsEngine()
-quadratic_swing, linear_swing = engine.calculate_relative_swing_bestfit(
-    side_on_points, FPS, INITIAL_SPEED_KMH, K_inv, R_T, t_std, DRAG_COEFFICIENT
-)
-print(f"Swing at 17m - quadratic: {quadratic_swing[-1][1]:.2f}cm, linear: {linear_swing[-1][1]:.2f}cm")
-
-engine.plot_relative_swing_bestfit_analysis(
-    side_on_points, FPS, INITIAL_SPEED_KMH, K_inv, R_T, t_std, DRAG_COEFFICIENT,
-    save_path="delivery_2_swing_analysis.png",
-)
-
-'''
-seam angle relative to release angle
-initial speed
-final swing
-swing at last tracked point
-initial angle of release
-x y z at each point
-
-'''

@@ -6,8 +6,8 @@ import checkers
 import drawers
 import display
 import calculators
-from helpers import Key
-from automations import TopDownBallDataPoint, SideOnBallDataPoint
+from helpers import Key, TopDownBallData, TopDownBallDataPoint, SideOnBallData, SideOnBallDataPoint, Coord, Video
+from top_down_physics_engine import SelectionType, TopDownPhysicsEngine
 
 
 ZOOM_FACTOR = 10
@@ -27,7 +27,7 @@ class TopDownTracker:
         self.tracking_active = False
         self.seam_angle_active = False
         self.window_name = "Cricket Ball Tracker - Main View"
-        self.ball_diameter_m = 0.073
+        self.ball_diameter_m = 0.072
         self.first_frame_main = None
 
         self.display = display.Display()
@@ -69,9 +69,8 @@ class TopDownTracker:
                 self.seam_points.append((x, y))
                 print(f"Seam point added: ({x}, {y})")
                 if len(self.seam_points) == 2:
-                    self.seam_measurements, self.seam_points = self.calculators._calculate_seam_angle(self.seam_points, self.seam_measurements, self.top_down_video.get_current_frame_number())
                     self.seam_angle_active = False
-                    print(f"Seam angle tracking stopped for frame {self.top_down_video.get_current_frame_number()}. Angle: {self.seam_measurements[-1][1]:.2f} degrees")
+                    print(f"Seam angle tracking stopped for frame {self.top_down_video.get_current_frame_number()}. Points: {self.seam_points[0]} and {self.seam_points[1]}")
     
 
     def run(self):
@@ -181,10 +180,50 @@ class TopDownTracker:
                     else:
                         self.top_down_video.cap.release()
                         cv2.destroyAllWindows()
-                        return self.frame_positions, self.seam_points, self.seam_measurements, self.calibrations, self.meters_per_pixel, self.deceleration, self.first_frame_main
+                        return 
                 case Key.o:
                     self.top_down_video.rotate()
                     print(f"Main view rotated to {self.top_down_video.rotation} degrees")
+
+    def get_top_down_points(self) -> list[TopDownBallDataPoint]:
+        self.run()
+
+        # Get calibration points for speed calcuations.
+        # frame_positions is a list of tuples: (frame_number, x, y, timestamp)
+        # seam_points is a list of tuples: (x, y)
+        # self.calibrations is a list of tuples: (frame_number, [(x1, y1), (x2, y2)])
+        frame_positions = {frame_number: (x, y, timestamp) for frame_number, x, y, timestamp in self.frame_positions}
+        remaining_seams = self.seam_points.copy()
+        calibrations = {frame_number: points for frame_number, points in self.calibrations}
+
+        frame_list = sorted(set(frame_positions.keys()) | set(calibrations.keys()))
+
+        if len(remaining_seams) % 2 != 0:
+            raise IndexError("Odd number of seam points detected. No matching end seam point for the last start seam point.")
+
+        points_list = []
+
+        for frame in frame_list:
+            point = TopDownBallDataPoint(
+                frame_number=frame,
+                data=TopDownBallData(
+                    top_left=Coord(*calibrations[frame][0]) if frame in calibrations else None,
+                    bottom_right=Coord(*calibrations[frame][1]) if frame in calibrations else None,
+                    centre=Coord(*frame_positions[frame][:2]) if frame in frame_positions else None,
+                    seam_start=Coord(*remaining_seams.pop(0)) if remaining_seams else None,
+                    seam_end=Coord(*remaining_seams.pop(0)) if remaining_seams else None,
+                    seam_angle=None
+                )
+            )
+            if point.data.top_left and point.data.bottom_right and not point.data.centre:
+                # Calculate the centre if top_left and bottom_right are available but centre is not.
+                point.data.calc_centre()
+            if point.data.seam_start and point.data.seam_end:
+                point.data.calc_seam_angle()
+            points_list.append(point)
+        return points_list
+            
+
 
 class SideOnTracker:
     def __init__(self):
@@ -434,8 +473,3 @@ class SideOnTracker:
                     self.side_frame_for_main_frame1 = None
                     print("Side view tracking, calibration, and frame mapping reset.")
 
-tracker = TopDownTracker()
-x = tracker.run()
-
-for i in x:
-    print(i)

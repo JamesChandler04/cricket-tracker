@@ -119,7 +119,7 @@ CUBE_CENTRE_X_M = 0.0
 CUBE_CENTRE_Z_M = 0.0
 
 POINTS_CSV_NAME = "tracked_points.csv"
-ANALYSIS_YAML_NAME = "analysis.yaml"
+ANALYSIS_YAML_NAME = "side_on_analysis.yaml"
 
 _BLUE, _ORANGE, _GREEN, _GREY, _INK = '#2a78d6', '#eb6834', '#1baf7a', '#888780', '#111111'
 

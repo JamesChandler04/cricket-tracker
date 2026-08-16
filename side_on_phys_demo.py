@@ -12,7 +12,7 @@ Run it directly:
 
 import numpy as np
 
-from new_physics_engine import SideOnPhysicsEngine, TrackedPoint
+from side_on_physics_engine import SideOnPhysicsEngine, TrackedPoint
 
 
 CALIBRATION_PATH = "camera_calibration.npz"
