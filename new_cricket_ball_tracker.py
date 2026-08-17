@@ -75,5 +75,11 @@ def side_on(velocity):
 
     engine.plot_trajectory_3d(result, show=DISPLAY_3D_PLOT)
 
-vel = top_down()
+vel, angle = top_down()
+
+print(f"Using calculated velocity {vel}.")
+
 side_on(vel)
+
+print("\nTracking fininshed.")
+print(f"All data saved to {SAVE_DIR}")
