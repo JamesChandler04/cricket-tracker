@@ -614,7 +614,7 @@ class SideOnPhysicsEngine:
 
         return {"points_csv": str(csv_path), "analysis_yaml": str(yaml_path)}
 
-    def plot_swing(self, result: SwingResult, save_path="swing.png", show=False):
+    def plot_swing(self, result: SwingResult, save_path="", show=False):
         """Trajectory, baseline, projection, and both swing values as measured gaps."""
         import matplotlib.pyplot as plt
 

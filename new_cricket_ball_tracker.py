@@ -1,11 +1,14 @@
 from manual_tracker import TopDownTracker, SideOnTracker
 from top_down_physics_engine import SelectionType, TopDownPhysicsEngine
 from side_on_physics_engine import SideOnPhysicsEngine
-
+from pathlib import Path
 import numpy as np
 
 SAVE_DIR = "output_folder/demo_delivery"
 TOP_DOWN_VALUE_FILE = "top_down_analysis"
+SIDE_ON_VALUE_FILE = "side_on_analysis"
+SWING_PLOT_FILE = "swing"
+TRAJECTORY_PLOT_FILE = "trajectory_3d"
 
 CALIBRATION_PATH = "camera_calibration.npz"
 DISPLAY_3D_PLOT = False
@@ -33,6 +36,11 @@ def top_down():
     return velocity, seam_angle
 
 def side_on(velocity):
+    print(f"Top down velocity was calculated to be {velocity:.2f} km/h")
+    auto_vel = input("Do you want to use this calculated velocity? (y/n)\n")
+    if auto_vel == "n":
+        velocity = float(input("New velocity: "))
+
     tracker = SideOnTracker()
     clicked_points = tracker.get_side_on_points()
 
@@ -70,10 +78,13 @@ def side_on(velocity):
     written = engine.save_data_to_files(result, SAVE_DIR, points=clicked_points)
     print("\nwrote " + "\nwrote ".join(written.values()))
 
-    engine.plot_swing(result, save_path="swing.png")
-    print("wrote swing.png")
+    Path(SAVE_DIR).mkdir(parents=True, exist_ok=True)
 
-    engine.plot_trajectory_3d(result, show=DISPLAY_3D_PLOT)
+    swing_path = engine.plot_swing(result, save_path=str(Path(SAVE_DIR) / SWING_PLOT_FILE))
+    print(f"wrote {swing_path}")
+
+    engine.plot_trajectory_3d(result, show=DISPLAY_3D_PLOT, save_path=str(Path(SAVE_DIR) / TRAJECTORY_PLOT_FILE))
+
 
 vel, angle = top_down()
 

@@ -65,7 +65,7 @@ class TopDownTracker:
                     self.first_frame_main = self.top_down_video.get_current_frame_number()
                     print(f"Main view Frame 1 set to raw frame {self.first_frame_main}")
                 self._add_or_replace_point_for_frame(self.top_down_video.get_current_frame_number(), x, y, timestamp)
-                print(f"Main View - Frame {self.top_down_video.get_current_frame_number()}: Ball at (x={x}, y={y}) - Time: {timestamp:.5f}s")
+                #print(f"Main View - Frame {self.top_down_video.get_current_frame_number()}: Ball at (x={x}, y={y}) - Time: {timestamp:.5f}s")
             elif self.seam_angle_active and self.meters_per_pixel is not None:
                 self.seam_points.append((x, y))
                 print(f"Seam point added: ({x}, {y})")
@@ -344,7 +344,7 @@ class SideOnTracker:
 
         if event == cv2.EVENT_LBUTTONDOWN:
             self.side_mouse_pos = (x, y)
-            print(f"Clicked at point ({x}, {y}).")
+            #print(f"Clicked at point ({x}, {y}).")
             if self.side_calibration_active:
                 if self.side_frame_for_main_frame1 is None:
                     print(f"Error: Track the first ball position before calibrating.")
@@ -365,7 +365,7 @@ class SideOnTracker:
                     self.side_frame_for_main_frame1 = self.side_on_video.get_current_frame_number()
                     print(f"Side view Frame 1 set to raw frame {self.side_frame_for_main_frame1}, corresponding to main view Frame 1")
                 self._add_or_replace_point_for_frame(self.side_on_video.get_current_frame_number(), x, y, timestamp)
-                print(f"Side View - Frame {self.side_on_video.get_current_frame_number()}: Ball at (x={x}, z={y}) - Time: {timestamp:.3f}s")
+                #print(f"Side View - Frame {self.side_on_video.get_current_frame_number()}: Ball at (x={x}, z={y}) - Time: {timestamp:.3f}s")
 
     def run(self):
         self.side_on_video = self.display.load_side_video()
