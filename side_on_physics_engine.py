@@ -11,6 +11,19 @@ in per call, since it changes from delivery to delivery.
 
 Requires numpy and PyYAML. matplotlib is imported only by the two plot methods.
 
+Coordinate frames
+-----------------
+The engine reconstructs in the frame the calibration was solved in: origin at
+the centre of the nearest calibration ring, X to the bowler's right, Y forward
+down the pitch, Z positive DOWNWARD. Trajectory, the fits, the swing values and
+both plots all use that frame.
+
+Files written by save_data_to_files use the frame that is easier to measure
+against with a tape: origin at the BOTTOM-LEFT CORNER of the nearest ring, X to
+the bowler's right, Y away from the bowler, Z positive up. The conversion is
+to_output_frame(): X and Y translated, Z translated and flipped. It is applied
+only on the way out to disk, so nothing upstream changes.
+
 Public API
 ----------
 Calibration.load(path)
@@ -27,7 +40,10 @@ engine.reconstruct_trajectory(points, speed_km_h) -> Trajectory
     Pixel track -> 3D world track.
 
 engine.ball_coordinates(trajectory, origin="cubes" | "release") -> (N, 3) array
-    Ball position in metres as X, Y, Z.
+    Ball position in metres as X, Y, Z, in the reconstruction frame.
+
+engine.to_output_frame(xyz) -> same shape
+    Reconstruction frame -> reported frame (nearest ring's bottom-left corner).
 
 engine.swing_at_last_tracked_point(trajectory) -> float
     Measured swing in cm at the last tracked point. This is the number to
@@ -41,8 +57,9 @@ engine.analyse(points, speed_km_h) -> SwingResult
     diagnostics. SwingResult.summary() renders it as text.
 
 engine.save_data_to_files(result, save_directory, points=None) -> dict
-    Write the whole analysis to disk: tracked_points.csv holds the per-point
-    coordinates, analysis.yaml holds everything else.
+    Write the whole analysis to disk in the reported frame:
+    tracked_points.csv holds the per-point coordinates, side_on_analysis.yaml
+    holds everything else.
 
 engine.plot_swing(result, save_path=..., show=...)
     2D lateral-position plot with both swing gaps annotated.
@@ -52,7 +69,7 @@ engine.plot_trajectory_3d(result, show=..., save_path=...)
 
 Typical use
 -----------
-    from physics_engine import SideOnPhysicsEngine, TrackedPoint
+    from side_on_physics_engine import SideOnPhysicsEngine, TrackedPoint
 
     engine = SideOnPhysicsEngine.from_calibration_file(
         "camera_calibration.npz", fps=239.76)
@@ -89,7 +106,8 @@ RING_FORWARD_DISTANCES_M, CUBE_SIDE_M, CUBE_CENTRE_X_M, CUBE_CENTRE_Z_M
     CUBE_SIDE_M at those forward distances, centred laterally on CUBE_CENTRE_X_M
     and vertically on CUBE_CENTRE_Z_M. Defaults assume the calibration origin is
     the centre of the first ring. Adjust to match how the cubes were actually
-    clicked.
+    clicked. These also set the reported frame's origin, so if the cube extent
+    is not 1.5 m each way the offsets change with it.
 """
 
 from __future__ import annotations
@@ -347,6 +365,10 @@ class SideOnPhysicsEngine:
         """
         Ball position in metres, as an (N, 3) array of X, Y, Z.
 
+        Both options are in the reconstruction frame, where Z is positive
+        DOWNWARD. Files on disk use the reported frame instead - pass the result
+        through to_output_frame() to match them.
+
         origin="cubes"    world frame set by the clicked cube corners: Y = 0 at
                           the release ring, X positive to the bowler's right,
                           Z positive downward.
@@ -358,6 +380,42 @@ class SideOnPhysicsEngine:
         if origin == "release":
             return trajectory.relative_to_release
         raise ValueError(f"origin must be 'cubes' or 'release', got {origin!r}")
+
+    @property
+    def output_frame_origin(self):
+        """
+        The reported frame's origin, expressed in reconstruction coordinates.
+
+        That origin is the bottom-left corner of the nearest ring, seen from
+        behind the bowler: half a cube side to the left of the ring centre, and
+        half a cube side below it. Y needs no shift, since the calibration
+        origin already sits in the plane of the nearest ring.
+        """
+        half = self.cube_side_m / 2.0
+        return np.array([self.cube_centre_x_m - half,
+                         0.0,
+                         self.cube_centre_z_m + half])
+
+    def to_output_frame(self, xyz):
+        """
+        Reconstruction coordinates -> reported coordinates.
+
+        Moves the origin from the centre of the nearest ring to its bottom-left
+        corner and turns Z the right way up, so the reported axes are: X to the
+        bowler's right, Y away from the bowler down the pitch towards the
+        further rings, Z up. X and Y are translated, Z is translated and
+        flipped, so gaps in X and Y survive unchanged and gaps in Z change sign.
+
+        Accepts a single (3,) point or an (N, 3) array and returns the same
+        shape.
+        """
+        points = np.atleast_2d(np.asarray(xyz, dtype=float))
+        origin = self.output_frame_origin
+        out = np.empty_like(points)
+        out[:, 0] = points[:, 0] - origin[0]
+        out[:, 1] = points[:, 1] - origin[1]
+        out[:, 2] = origin[2] - points[:, 2]
+        return out.reshape(np.shape(xyz))
 
     @staticmethod
     def _fit_line(y, x):
@@ -509,12 +567,37 @@ class SideOnPhysicsEngine:
         return value
 
     def _analysis_mapping(self, result: SwingResult, points_csv_name) -> dict:
-        """Assemble everything that is not per-point data into one plain mapping."""
+        """
+        Assemble everything that is not per-point data into one plain mapping.
+
+        Positions are written in the reported frame, so the file is internally
+        consistent with the CSV: the camera centre is converted, and both line
+        fits are moved across too. Slopes are unchanged by the move; only the
+        intercepts shift. K_inv, R_T and t_std stay exactly as solved, since
+        they define the reconstruction frame the conversion is measured from.
+        """
         traj = result.trajectory
         cal = self.calibration
+        origin = self.output_frame_origin
+
+        def reported_intercept(slope, intercept):
+            """Move a fitted line x(y) into the reported frame."""
+            return intercept - origin[0] + slope * origin[1]
+
         return self._plain({
             "written_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "points_csv": points_csv_name,
+            "coordinate_frame": {
+                "origin": "bottom-left corner of the nearest calibration ring",
+                "x": "lateral, positive to the bowler's right",
+                "y": "forward, positive away from the bowler down the pitch",
+                "z": "vertical, positive up",
+                "origin_in_reconstruction_frame_m": origin,
+                "note": ("the reconstruction frame is centred on the nearest ring "
+                         "with z positive downward; x and y are translated, z is "
+                         "translated and flipped. Applies to the tracked point "
+                         "coordinates, the camera centre and both line fits."),
+            },
             "delivery": {
                 "point_count": len(traj.frames),
                 "first_frame": traj.frames[0],
@@ -535,20 +618,22 @@ class SideOnPhysicsEngine:
             "baseline_fit": {
                 "source_point_count": result.baseline_points,
                 "slope": result.baseline_slope,
-                "intercept": result.baseline_intercept,
+                "intercept": reported_intercept(result.baseline_slope,
+                                                result.baseline_intercept),
                 "residual_rms_cm": result.baseline_residual_cm,
             },
             "projection_fit": {
                 "source_point_count": result.extrapolation_points,
                 "slope": result.projection_slope,
-                "intercept": result.projection_intercept,
+                "intercept": reported_intercept(result.projection_slope,
+                                                result.projection_intercept),
                 "residual_rms_cm": result.projection_residual_cm,
             },
             "calibration": {
                 "path": self.calibration_path,
                 "focal_px": list(cal.focal_px),
                 "principal_point_px": list(cal.principal_point),
-                "camera_centre_m": cal.camera_centre,
+                "camera_centre_m": self.to_output_frame(cal.camera_centre),
                 "implied_frame_size_px": list(cal.implied_frame_size),
                 "K_inv": cal.K_inv,
                 "R_T": cal.R_T,
@@ -572,8 +657,12 @@ class SideOnPhysicsEngine:
         """
         Write the whole analysis to save_directory, creating it if needed.
 
+        Coordinates are written in the reported frame: origin at the bottom-left
+        corner of the nearest calibration ring, X to the bowler's right, Y away
+        from the bowler, Z up. See to_output_frame.
+
         Two files are written. The CSV carries one row per tracked point: frame,
-        time, the source pixel coordinates if points is supplied, the world
+        time, the source pixel coordinates if points is supplied, the reported
         coordinates X, Y, Z and the release-relative dX, dY, dZ. The YAML
         carries everything else - delivery, swing values, both line fits, the
         calibration and the engine settings.
@@ -588,8 +677,8 @@ class SideOnPhysicsEngine:
         yaml_path = directory / f"{stem}{ANALYSIS_YAML_NAME}"
 
         traj = result.trajectory
-        cubes = self.ball_coordinates(traj, origin="cubes")
-        release = self.ball_coordinates(traj, origin="release")
+        reported = self.to_output_frame(self.ball_coordinates(traj, origin="cubes"))
+        release = reported - reported[0]
 
         header = ["frame", "time_s"]
         if points is not None:
@@ -599,11 +688,11 @@ class SideOnPhysicsEngine:
         with open(csv_path, "w", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(header)
-            for i in range(len(cubes)):
+            for i in range(len(reported)):
                 row = [int(traj.frames[i]), f"{traj.times_s[i]:.6f}"]
                 if points is not None:
                     row += [f"{points[i].u:g}", f"{points[i].v:g}"]
-                row += [f"{v:.6f}" for v in cubes[i]]
+                row += [f"{v:.6f}" for v in reported[i]]
                 row += [f"{v:.6f}" for v in release[i]]
                 writer.writerow(row)
 
