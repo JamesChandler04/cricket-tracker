@@ -1,5 +1,7 @@
 # Automatic Cricket Ball Tracker
 
+## Installation And Usage
+
 To clone the repo, run the following command.
 
 ```sh
@@ -12,8 +14,14 @@ To run the code, refer to the instructions on how to use make [here](./MAKE_GUID
 pip install -r requirements.txt
 ```
 
-And run the program with this command.
+You can run the text-based version of the program with this command:
 
 ```sh
-python cricket_ball_tracker.py
+python new_cricket_ball_tracker.py
+```
+
+And the graphics-based version with this command:
+
+```sh
+python GUI_new_cricket_ball_tracker.py
 ```

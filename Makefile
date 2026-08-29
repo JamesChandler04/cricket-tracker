@@ -8,8 +8,11 @@ setup:
 install:
 	$(VENV)\activate && pip install -r requirements.txt
 
-run:
-	$(VENV)\python cricket_ball_tracker.py
+run-text:
+	$(VENV)\python new_cricket_ball_tracker.py
+
+run-gui:
+	$(VENV)\python GUI_new_cricket_ball_tracker.py
 
 test:
 	$(VENV)\activate && pip list
