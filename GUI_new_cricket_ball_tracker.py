@@ -1,7 +1,18 @@
 """
 Wraps the pipeline in new_cricket_ball_tracker.py without modifying any module
 it drives. manual_tracker, camera_calibration, top_down_physics_engine and
-side_on_physics_engine are called exactly as the script called them.
+side_on_physics_engine are called exactly as the script called them, apart
+from the seam angle.
+
+The seam angle is its own step here, not part of top-down tracking. Once the
+top-down video has been clicked through, detect_seam_angle_file crops the ball
+out of every tracked frame using the clicked centres and diameter, saves the
+crops to a ball_images folder, and hands them to a seam detector. The
+"Automatic seam angle detection" checkbox picks which one (see
+MainWindow._seam_detector). Unticked, ManualSeamAngleDetector opens a window to
+click the seam, another blocking OpenCV loop that runs on the worker thread
+like the trackers. Ticked, AutomaticSeamAngleDetector from automatic_seam_angle
+finds it without a window.
 
 Four things in the pipeline do not sit naturally inside a GUI. Each is handled
 by a shim installed here rather than by editing the module that causes it.
@@ -69,6 +80,9 @@ from PyQt5.QtWidgets import (
 )
 
 import camera_calibration
+from automatic_seam_angle import AutomaticSeamAngleDetector
+from detect_seam_angle_file import (ManualSeamAngleDetector, SeamAngleDetector,
+                                    save_ball_images, save_seam_measurement)
 from helpers import Video
 from log_bridge import bridge
 from manual_tracker import SideOnTracker, TopDownTracker
@@ -237,27 +251,43 @@ class TaskThread(QThread):
             self.failed.emit(traceback.format_exc())
 
 
-def track_top_down(display, save_dir, value_file):
-    """Click the top-down video through, then take velocity and seam angle from it."""
+def track_top_down(display, save_dir, value_file, seam_detector: SeamAngleDetector):
+    """
+    Click the top-down video through and take the velocity from it, then save
+    the ball images and let seam_detector find the seam angle on them.
+    """
+    print("The seam angle is picked from the ball images after tracking, "
+          "so T (seam mode) is not needed in the top-down window.")
     tracker = TopDownTracker()
     tracker.display = display
     points = tracker.get_top_down_points()
 
     engine = TopDownPhysicsEngine()
-    fps = tracker.top_down_video.fps
+    video = tracker.top_down_video
+    fps = video.fps
 
-    velocity = engine.calculate_velocity(points, fps=fps, type=SelectionType.MEAN)
+    velocity, velocities = engine.calculate_velocity(points, fps=fps, type=SelectionType.MEAN)
     print(f"Calculated velocity: {velocity:.2f} km/h")
+    print("Per-frame velocities: " + ", ".join(f"{v:.1f}" for v in velocities) + " km/h")
 
-    seam_angle = engine.calculate_seam_angle(points)
-    print(f"Calculated seam angle: {seam_angle}")
+    # Seam angle step. The crops are taken from the frames the clicks were made
+    # on, so they use the same video and the same rotation as the tracker.
+    ball_images = save_ball_images(display.main_path, points, save_dir,
+                                   rotation=video.rotation)
+    seam = seam_detector.detect(ball_images)
+    seam_angle = None if seam is None else seam.seam_angle_deg
+    if seam is not None:
+        print(f"Seam saved to {save_seam_measurement(seam)}")
+    print(f"Calculated seam angle ({seam_detector.method}): "
+          + ("not set" if seam_angle is None else f"{seam_angle:+.2f} deg"))
 
     path = engine.save_top_down_analysis(save_dir, value_file, velocity, seam_angle,
                                          fps, len(points))
     print(f"Top down values saved to {path}")
 
-    return {"velocity": float(velocity), "seam_angle": seam_angle, "fps": float(fps),
-            "point_count": len(points), "path": str(path)}
+    return {"velocity": float(velocity), "seam_angle": seam_angle,
+            "seam_frame": None if seam is None else seam.frame_number,
+            "fps": float(fps), "point_count": len(points), "path": str(path)}
 
 
 def track_side_on(display, velocity_km_h, calibration_path, save_dir):
@@ -404,6 +434,12 @@ class MainWindow(QMainWindow):
                                  "to run the side-on stage on its own.")
         form.addRow("Delivery speed", self.velocity)
 
+        self.automatic_seam = QCheckBox("Automatic seam angle detection")
+        self.automatic_seam.setToolTip("Ticked: automatic_seam_angle.py finds the seam on "
+                                       "the ball images.\nUnticked: click the seam yourself "
+                                       "in the seam angle window.")
+        form.addRow("", self.automatic_seam)
+
         self.show_3d = QCheckBox("Open the 3D plot in its own window")
         form.addRow("", self.show_3d)
         layout.addWidget(inputs)
@@ -546,20 +582,29 @@ class MainWindow(QMainWindow):
             self.append_log("No calibration was saved.")
             self.statusBar().showMessage("No calibration was saved.")
 
+    def _seam_detector(self) -> SeamAngleDetector:
+        """The seam detector to run after top-down tracking, as chosen by the checkbox."""
+        if self.automatic_seam.isChecked():
+            return AutomaticSeamAngleDetector()
+        return ManualSeamAngleDetector()
+
     def start_top_down(self):
         if not self._require(self.top_down_path, "Choose a top-down video first."):
             return
         display = ScriptedDisplay(main_path=self.top_down_path.text(),
                                   main_start=self.top_down_start.value())
         save_dir = self.save_dir.text()
-        self._run(lambda: track_top_down(display, save_dir, TOP_DOWN_VALUE_FILE),
+        seam_detector = self._seam_detector()
+        self._run(lambda: track_top_down(display, save_dir, TOP_DOWN_VALUE_FILE,
+                                         seam_detector),
                   self._top_down_finished, "Tracking top-down")
 
     def _top_down_finished(self, data):
         self.velocity.setValue(data["velocity"])
         self.readouts["Velocity"].setText(f"{data['velocity']:.2f} km/h")
         angle = data["seam_angle"]
-        self.readouts["Seam angle"].setText("-" if angle is None else f"{angle:.2f} deg")
+        self.readouts["Seam angle"].setText(
+            "-" if angle is None else f"{angle:+.2f} deg (frame {data['seam_frame']})")
         self.readouts["Tracked points"].setText(str(data["point_count"]))
         self.statusBar().showMessage(f"Top-down done, {data['velocity']:.2f} km/h.")
 
@@ -603,9 +648,10 @@ class MainWindow(QMainWindow):
         save_dir = self.save_dir.text()
         calibration = self.calibration_path.text()
         router = self.router
+        seam_detector = self._seam_detector()
 
         def both():
-            top_down = track_top_down(display, save_dir, TOP_DOWN_VALUE_FILE)
+            top_down = track_top_down(display, save_dir, TOP_DOWN_VALUE_FILE, seam_detector)
             speed = float(router(f"Top down velocity was calculated to be "
                                  f"{top_down['velocity']:.2f} km/h. "
                                  f"Speed to reconstruct with, in km/h:"))
