@@ -160,6 +160,10 @@ class SeamMeasurement:
             return None
         return fold_line_angle(self.raw_angle_deg - travel)
 
+    def details(self) -> dict[str, object]:
+        """Anything more a detector wants saved with the seam. Nothing by default."""
+        return {}
+
 
 # ------------------------------------------------------------ ball images
 
@@ -259,6 +263,7 @@ def save_seam_measurement(seam: SeamMeasurement, folder: str | Path | None = Non
             "raw_angle_deg": seam.raw_angle_deg,
             "travel_direction_deg": seam.image.travel_direction_deg,
             "seam_angle_deg": seam.seam_angle_deg,
+            **seam.details(),
         }, handle, sort_keys=False, default_flow_style=None)
     return path
 

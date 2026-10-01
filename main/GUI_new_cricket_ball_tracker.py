@@ -1,46 +1,3 @@
-"""
-Wraps the pipeline in new_cricket_ball_tracker.py without modifying any module
-it drives. manual_tracker, camera_calibration, top_down_physics_engine and
-side_on_physics_engine are called exactly as the script called them, apart
-from the seam angle.
-
-The seam angle is its own step here, not part of top-down tracking. Once the
-top-down video has been clicked through, detect_seam_angle_file crops the ball
-out of every tracked frame using the clicked centres and diameter, saves the
-crops to a ball_images folder, and hands them to a seam detector. The
-"Automatic seam angle detection" checkbox picks which one (see
-MainWindow._seam_detector). Unticked, ManualSeamAngleDetector opens a window to
-click the seam, another blocking OpenCV loop that runs on the worker thread
-like the trackers. Ticked, AutomaticSeamAngleDetector from automatic_seam_angle
-finds it without a window.
-
-Four things in the pipeline do not sit naturally inside a GUI. Each is handled
-by a shim installed here rather than by editing the module that causes it.
-
-  Blocking OpenCV loops
-      Both trackers and the calibration clicker own a cv2 window and spin on
-      cv2.waitKey until the user presses s, q or Esc. They run on a QThread so
-      the window stays responsive. sys.exit inside them arrives as SystemExit
-      and is reported as a cancellation instead of killing the app.
-
-  input() prompts
-      camera_calibration asks for the frame and the save path, and Video asks
-      for the frame rate when the metadata is missing. PromptRouter replaces
-      builtins.input for the whole process. Prompts the GUI already knows the
-      answer to are answered from the form; anything else opens a modal dialog
-      on the GUI thread while the worker blocks.
-
-  tkinter file dialogs
-      display.Display opens tkinter to pick a video, which is not safe off the
-      main thread. Videos are chosen here up front and injected through
-      ScriptedDisplay, which duck-types Display and never touches tkinter.
-
-  matplotlib
-      Figures are only ever created on the GUI thread. The worker returns the
-      SwingResult and this window does the plotting, so pyplot is never touched
-      from a worker and the interactive 3D view still rotates.
-"""
-
 from __future__ import annotations
 
 import builtins
@@ -86,7 +43,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from library import camera_calibration, paths
-from library.automated.automatic_seam_angle import AutomaticSeamAngleDetector
+from library.automated.automatic_seam_angle import AutomaticSeamAngleDetector, AveragedSeamMeasurement
 from library.detect_seam_angle_file import (ManualSeamAngleDetector, SeamAngleDetector,
                                             save_ball_images, save_seam_measurement)
 from library.helpers import Video
@@ -282,17 +239,24 @@ def track_top_down(display, save_dir, value_file, seam_detector: SeamAngleDetect
                                    rotation=video.rotation)
     seam = seam_detector.detect(ball_images)
     seam_angle = None if seam is None else seam.seam_angle_deg
+    seam_warning = None
+    seam_source: str | None
+    if isinstance(seam, AveragedSeamMeasurement):
+        seam_source = f"average of {len(seam.frame_angles_deg)} frames, spread {seam.spread_deg:.1f} deg"
+        seam_warning = seam.warning
+    else:
+        seam_source = None if seam is None else f"frame {seam.frame_number}"
     if seam is not None:
         print(f"Seam saved to {save_seam_measurement(seam)}")
     print(f"Calculated seam angle ({seam_detector.method}): "
-          + ("not set" if seam_angle is None else f"{seam_angle:+.2f} deg"))
+          + ("not set" if seam_angle is None else f"{seam_angle:+.2f} deg ({seam_source})"))
 
     path = engine.save_top_down_analysis(save_dir, value_file, velocity, seam_angle,
                                          fps, len(points))
     print(f"Top down values saved to {path}")
 
     return {"velocity": float(velocity), "seam_angle": seam_angle,
-            "seam_frame": None if seam is None else seam.frame_number,
+            "seam_source": seam_source, "seam_warning": seam_warning,
             "fps": float(fps), "point_count": len(points), "path": str(path)}
 
 
@@ -610,9 +574,11 @@ class MainWindow(QMainWindow):
         self.readouts["Velocity"].setText(f"{data['velocity']:.2f} km/h")
         angle = data["seam_angle"]
         self.readouts["Seam angle"].setText(
-            "-" if angle is None else f"{angle:+.2f} deg (frame {data['seam_frame']})")
+            "-" if angle is None else f"{angle:+.2f} deg ({data['seam_source']})")
         self.readouts["Tracked points"].setText(str(data["point_count"]))
         self.statusBar().showMessage(f"Top-down done, {data['velocity']:.2f} km/h.")
+        if data["seam_warning"]:
+            QMessageBox.warning(self, "Cricket ball tracker", data["seam_warning"])
 
     def start_side_on(self):
         if not self._require(self.side_on_path, "Choose a side-on video first."):
