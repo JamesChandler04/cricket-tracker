@@ -1,3 +1,6 @@
+import sys
+import yaml
+
 from manual_tracker import TopDownTracker, SideOnTracker
 from top_down_physics_engine import SelectionType, TopDownPhysicsEngine
 from side_on_physics_engine import SideOnPhysicsEngine
@@ -22,7 +25,7 @@ def top_down():
     fps = tracker.top_down_video.fps
 
     # Calculate velocity using the clicked points and fps
-    velocity = engine.calculate_velocity(clicked_points, fps=fps, type=SelectionType.MEAN)
+    velocity, velocity_list = engine.calculate_velocity(clicked_points, fps=fps, type=SelectionType.MEAN)
     print(f"Calculated velocity: {velocity:.2f} km/h")
 
     # Calculate seam angle
@@ -33,7 +36,7 @@ def top_down():
     path = engine.save_top_down_analysis(SAVE_DIR, TOP_DOWN_VALUE_FILE, velocity, seam_angle, fps, len(clicked_points))
     print(f"Top down values saved to {path}")
 
-    return velocity, seam_angle
+    return velocity, velocity_list, seam_angle
 
 def side_on(velocity):
     print(f"Top down velocity was calculated to be {velocity:.2f} km/h")
@@ -86,7 +89,27 @@ def side_on(velocity):
     engine.plot_trajectory_3d(result, show=DISPLAY_3D_PLOT, save_path=str(Path(SAVE_DIR) / TRAJECTORY_PLOT_FILE))
 
 
-vel, angle = top_down()
+vel, vel_list, angle = top_down()
+
+ball = input("Enter ball number: ")
+delivery_num = input("Enter delivery number: ")
+
+with open("report_data/radar_speeds.yaml", "r") as f:
+    radar_data = yaml.safe_load(f)
+    try:
+        speed = radar_data[f"ball_{ball}"][f"delivery_{delivery_num}"]
+        print(f"Radar speed for ball is {speed}")
+    except KeyError:
+        print(f"Radar speed for ball {ball} delivery {delivery_num} not found in radar_speeds.yaml")
+        sys.exit()
+
+with open("report_data/actual_top_down_data.csv", "a") as f:
+    f.write(f"{ball},{delivery_num},{[int(v) for v in vel_list]},{int(angle)}\n")
+    print(f"Data saved as {ball},{delivery_num},{[int(v) for v in vel_list]},{int(angle)}")
+
+
+
+sys.exit()
 
 print(f"Using calculated velocity {vel}.")
 

@@ -51,7 +51,7 @@ class SelectionType(Enum):
     MAX = 3
 
 class TopDownPhysicsEngine:
-    def calculate_velocity(self, top_down_points: list[TopDownBallDataPoint], fps: float, type: SelectionType) -> float:
+    def calculate_velocity(self, top_down_points: list[TopDownBallDataPoint], fps: float, type: SelectionType) -> tuple[float, list[float]]:
         '''
         Turns list of top down points to velocities (km/h).
         Uses average velocity of all points.
@@ -88,11 +88,11 @@ class TopDownPhysicsEngine:
             raise ValueError("No valid velocity data could be calculated from the provided top down points.")
         
         if type == SelectionType.MIN:
-            return min(velocities)
+            return min(velocities), velocities
         if type == SelectionType.MAX:
-            return max(velocities)
+            return max(velocities), velocities
         # SelectionType.MEAN
-        return sum(velocities) / len(velocities)
+        return sum(velocities) / len(velocities), velocities
 
     def calculate_seam_angle(self, top_down_points: list[TopDownBallDataPoint]) -> float | None:
         '''
