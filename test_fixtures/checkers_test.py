@@ -1,10 +1,6 @@
-import sys
-
-sys.path.append("../")
-
 import pytest
 import math
-from checkers import Checker
+from library.checkers import Checker
 
 @pytest.fixture
 def checker():

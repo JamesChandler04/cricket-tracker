@@ -1,11 +1,7 @@
-import sys
-
-sys.path.append("../")
-
 import pytest
 from unittest.mock import patch, MagicMock
 import cv2
-from display import Display
+from library.display import Display
 
 
 class TestDisplay:

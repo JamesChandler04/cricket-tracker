@@ -1,10 +1,6 @@
-import sys
-
-sys.path.append('../')
-
 import pytest
 import math
-from calculators import Calculators
+from library.calculators import Calculators
 
 @pytest.fixture
 def calc():

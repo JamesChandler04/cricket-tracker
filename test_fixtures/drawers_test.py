@@ -1,11 +1,7 @@
-import sys
-
-sys.path.append("../")
-
 import pytest
 from unittest.mock import patch, MagicMock
 import cv2
-from drawers import Drawers
+from library.drawers import Drawers
 
 @pytest.fixture
 def drawers():

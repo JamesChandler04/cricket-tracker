@@ -14,7 +14,7 @@ bounding_boxes:
       x: 766
       y: 440
 raw_output:
-  folder: output_folder
+  folder: output
   save_csv: true
   save_excel: false
   save_json: false
