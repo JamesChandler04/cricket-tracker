@@ -12,8 +12,9 @@ matplotlib.use("Qt5Agg")
 
 import numpy as np
 from PyQt5.QtCore import QObject, Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtGui import QFont, QKeySequence, QPixmap
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QDoubleSpinBox,
@@ -22,6 +23,7 @@ from PyQt5.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -29,9 +31,16 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QShortcut,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QTreeWidgetItemIterator,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +60,7 @@ from library.log_bridge import bridge
 from library.manual_tracker import SideOnTracker, TopDownTracker
 from library.physics_engines.side_on_physics_engine import SideOnPhysicsEngine
 from library.physics_engines.top_down_physics_engine import SelectionType, TopDownPhysicsEngine
+from library.results import ResultRow, load_coordinates, load_results
 
 
 SAVE_DIR = str(paths.DELIVERY_DIR)
@@ -337,6 +347,28 @@ class ImageView(QLabel):
                                                Qt.SmoothTransformation))
 
 
+class ElidedLabel(QLabel):
+    """One line of text, shortened in the middle when it does not fit, with all of it as the tooltip."""
+
+    def __init__(self):
+        super().__init__()
+        self._full_text = ""
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setStyleSheet("color: #888780;")
+
+    def set_full_text(self, text):
+        self._full_text = text
+        self.setToolTip(text)
+        self._elide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self):
+        self.setText(self.fontMetrics().elidedText(self._full_text, Qt.ElideMiddle, max(self.width(), 1)))
+
+
 class MainWindow(QMainWindow):
     """Controls on the left, log and plots on the right."""
 
@@ -362,6 +394,9 @@ class MainWindow(QMainWindow):
 
         sys.stdout = bridge
         bridge.message_received.connect(self.append_log)
+
+        self.save_dir.editingFinished.connect(self.load_results)
+        self.load_results()
 
         self.statusBar().showMessage("Ready.")
         self.append_log("Pick both videos and a calibration file, then track.")
@@ -484,7 +519,69 @@ class MainWindow(QMainWindow):
         box.addWidget(self.open_3d_button)
         self.tabs.addTab(trajectory_tab, "Trajectory")
 
+        self.tabs.addTab(self._build_results_tab(), "Results")
+        self.tabs.addTab(self._build_coordinates_tab(), "Coordinates")
         return self.tabs
+
+    def _build_results_tab(self):
+        """The numbers saved in the YAML files of the save folder."""
+        tab = QWidget()
+        box = QVBoxLayout(tab)
+        bar = QHBoxLayout()
+        self.results_folder = ElidedLabel()
+        bar.addWidget(self.results_folder, 1)
+        reload_button = QPushButton("Reload")
+        reload_button.setToolTip("Read the files in the save folder again.")
+        reload_button.clicked.connect(lambda: self.load_results())
+        bar.addWidget(reload_button)
+        copy_button = QPushButton("Copy")
+        copy_button.setToolTip("Copy the selected rows, or all of them, to paste into Excel.")
+        copy_button.clicked.connect(self.copy_results)
+        bar.addWidget(copy_button)
+        box.addLayout(bar)
+
+        self.results_tree = QTreeWidget()
+        self.results_tree.setHeaderLabels(["Quantity", "Value"])
+        self.results_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.results_tree.setAlternatingRowColors(True)
+        box.addWidget(self.results_tree)
+        shortcut = QShortcut(QKeySequence.Copy, self.results_tree, self.copy_results)
+        shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+        return tab
+
+    def _build_coordinates_tab(self):
+        """X, Y, Z and dX, dY, dZ for every tracked frame, from tracked_points.csv."""
+        tab = QWidget()
+        box = QVBoxLayout(tab)
+        note = QLabel("Ball position on each tracked side-on frame. X, Y and Z are measured from "
+                      "the bottom-left corner of the nearest calibration ring (X to the bowler's "
+                      "right, Y down the pitch, Z up). dX, dY and dZ are measured from the first "
+                      "tracked point.")
+        note.setWordWrap(True)
+        box.addWidget(note)
+
+        self.coordinates_table = QTableWidget()
+        self.coordinates_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.coordinates_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.coordinates_table.setAlternatingRowColors(True)
+        self.coordinates_table.verticalHeader().setVisible(False)
+        self.coordinates_table.setFont(MONOSPACE)
+        self.coordinates_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.coordinates_table.verticalHeader().setDefaultSectionSize(
+            self.coordinates_table.fontMetrics().height() + 8)
+        box.addWidget(self.coordinates_table)
+        shortcut = QShortcut(QKeySequence.Copy, self.coordinates_table, self.copy_coordinates)
+        shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+
+        bar = QHBoxLayout()
+        self.coordinates_status = ElidedLabel()
+        bar.addWidget(self.coordinates_status, 1)
+        copy_button = QPushButton("Copy")
+        copy_button.setToolTip("Copy the selected rows, or the whole table, to paste into Excel.")
+        copy_button.clicked.connect(self.copy_coordinates)
+        bar.addWidget(copy_button)
+        box.addLayout(bar)
+        return tab
 
     # ----------------------------------------------------------------- browse
 
@@ -508,6 +605,7 @@ class MainWindow(QMainWindow):
                                                 self.save_dir.text())
         if path:
             self.save_dir.setText(path)
+            self.load_results()
 
     # ------------------------------------------------------------------ steps
 
@@ -577,6 +675,7 @@ class MainWindow(QMainWindow):
             "-" if angle is None else f"{angle:+.2f} deg ({data['seam_source']})")
         self.readouts["Tracked points"].setText(str(data["point_count"]))
         self.statusBar().showMessage(f"Top-down done, {data['velocity']:.2f} km/h.")
+        self.load_results(Path(data["path"]).parent)
         if data["seam_warning"]:
             QMessageBox.warning(self, "Cricket ball tracker", data["seam_warning"])
 
@@ -604,6 +703,7 @@ class MainWindow(QMainWindow):
         self.engine, self.result = data["engine"], data["result"]
         self._show_results(self.result)
         self._draw_plots()
+        self.load_results(Path(data["written"]["analysis_yaml"]).parent)
         self.statusBar().showMessage("Side-on done.")
 
     def start_both(self):
@@ -653,6 +753,67 @@ class MainWindow(QMainWindow):
             f"{result.baseline_residual_cm:.2f} cm RMS")
         self.readouts["Projection residual"].setText(
             f"{result.projection_residual_cm:.2f} cm RMS")
+
+    def load_results(self, folder=None):
+        """Fill the Results and Coordinates tabs from the files in folder, or the save folder."""
+        folder = Path(folder) if folder else Path(self.save_dir.text() or SAVE_DIR)
+        self.results_folder.set_full_text(f"Saved in {folder}")
+
+        self.results_tree.clear()
+        for section in load_results(folder, f"{TOP_DOWN_VALUE_FILE}.yaml"):
+            item = QTreeWidgetItem([section.title, section.path.name])
+            font = item.font(0)
+            font.setBold(True)
+            item.setFont(0, font)
+            item.setToolTip(1, str(section.path))
+            self.results_tree.addTopLevelItem(item)
+            for row in section.rows:
+                self._add_result_row(item, row)
+            item.setExpanded(True)
+        self.results_tree.resizeColumnToContents(0)
+
+        table = load_coordinates(folder)
+        self.coordinates_table.clear()
+        self.coordinates_table.setColumnCount(len(table.headers))
+        self.coordinates_table.setHorizontalHeaderLabels(table.headers)
+        self.coordinates_table.setRowCount(len(table.rows))
+        for r, row in enumerate(table.rows):
+            for c, text in enumerate(row):
+                cell = QTableWidgetItem(text)
+                cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.coordinates_table.setItem(r, c, cell)
+        self.coordinates_status.set_full_text(table.message or f"{len(table.rows)} frames, from {table.path}")
+
+    def _add_result_row(self, parent, row: ResultRow):
+        item = QTreeWidgetItem([row.name, row.value])
+        item.setFont(1, MONOSPACE)
+        parent.addChild(item)
+        for child in row.children:
+            self._add_result_row(item, child)
+        item.setExpanded(len(row.children) <= 12)
+
+    def copy_results(self):
+        """Copy the selected rows of the Results tab, or all of them, as tab-separated text."""
+        rows = []
+        everything = not self.results_tree.selectedItems()
+        iterator = QTreeWidgetItemIterator(self.results_tree)
+        while iterator.value():
+            item = iterator.value()
+            if everything or item.isSelected():
+                rows.append(f"{item.text(0)}\t{item.text(1)}")
+            iterator += 1
+        QApplication.clipboard().setText("\n".join(rows))
+        self.statusBar().showMessage(f"Copied {len(rows)} rows.")
+
+    def copy_coordinates(self):
+        """Copy the selected rows of the Coordinates tab, or the whole table, with its headings."""
+        table = self.coordinates_table
+        rows = sorted({index.row() for index in table.selectedIndexes()}) or range(table.rowCount())
+        columns = range(table.columnCount())
+        lines = ["\t".join(table.horizontalHeaderItem(c).text() for c in columns)]
+        lines += ["\t".join(table.item(r, c).text() for c in columns) for r in rows]
+        QApplication.clipboard().setText("\n".join(lines))
+        self.statusBar().showMessage(f"Copied {len(lines) - 1} rows.")
 
     def _draw_plots(self):
         """Runs on the GUI thread, so matplotlib is never touched from a worker."""
