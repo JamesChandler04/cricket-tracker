@@ -1,3 +1,8 @@
+"""Seam angle step: ball crops from the clicked top-down frames, the SeamAngleDetector
+interface and the manual seam picker window. The seam angle is the seam line's angle in
+the image minus the direction of travel, folded into (-90, 90] degrees.
+"""
+
 from __future__ import annotations
 
 import math
@@ -15,41 +20,66 @@ from library.helpers import Coord, TopDownBallDataPoint, Video
 
 
 DEFAULT_SAVE_DIR = paths.DELIVERY_DIR
+"""Save folder whose ball images are used when main is given no folder."""
 BALL_IMAGE_FOLDER = "ball_images"
+"""Folder in the save folder for the ball images, their index and the seam files."""
 INDEX_FILE_NAME = "ball_images.yaml"
+"""Index file saved with the ball images, recording where each one was cropped from."""
 IMAGE_NAME = "frame_{frame:06d}.png"
+"""File name pattern for a ball image, from its frame number."""
 SEAM_FILE_NAME = "seam_angle_{method}.yaml"
+"""File name pattern for a saved seam, from the name of the method that found it."""
 
-# Side of each square crop, in ball diameters. The margin round the ball allows
-# for a slightly off-centre click and for motion blur.
 CROP_SCALE = 1.5
+"""Side of each square ball crop, in ball diameters. The margin round the ball allows
+for a slightly off-centre click and for motion blur.
+"""
 
 # Seam picker window layout, in window pixels, top to bottom: a line with the
 # frame and seam angle, the enlarged ball image, a strip of every ball image,
 # and a line of controls.
 MARGIN = 16
-VIEW_SIZE = 560                                  # the enlarged ball image
+"""Margin at the left, right and top of the seam picker window, in px."""
+VIEW_SIZE = 560
+"""Side of the enlarged ball image, in px."""
 CANVAS_WIDTH = VIEW_SIZE + 2 * MARGIN
-INFO_Y = MARGIN + 16                             # baseline of the frame / seam angle line
+"""Width of the seam picker window, in px."""
+INFO_Y = MARGIN + 16
+"""Baseline of the top line of text, with the frame and seam angle, in px."""
 VIEW_X = MARGIN
+"""Left edge of the enlarged ball image, in px."""
 VIEW_Y = INFO_Y + 14
+"""Top edge of the enlarged ball image, in px."""
 THUMB_SIZE = 64
+"""Side of each thumbnail in the strip of ball images, in px."""
 THUMB_GAP = 8
-STRIP_Y = VIEW_Y + VIEW_SIZE + 12                # top of the thumbnail strip
-HINT_Y = STRIP_Y + THUMB_SIZE + 24               # baseline of the controls line
+"""Gap between neighbouring thumbnails, in px."""
+STRIP_Y = VIEW_Y + VIEW_SIZE + 12
+"""Top edge of the thumbnail strip, in px."""
+HINT_Y = STRIP_Y + THUMB_SIZE + 24
+"""Baseline of the line of controls at the bottom of the window, in px."""
 CANVAS_HEIGHT = HINT_Y + 14
+"""Height of the seam picker window, in px."""
 
 # Colours, BGR. The seam colour matches the seam points in drawers.py.
 BACKGROUND = (255, 255, 255)
+"""White background of the seam picker window, as a BGR colour."""
 TEXT = (40, 40, 40)
+"""Dark grey for the top text line and the current thumbnail's box, as a BGR colour."""
 HINT_TEXT = (130, 130, 130)
+"""Mid grey for the line of controls, as a BGR colour."""
 THUMB_BORDER = (205, 205, 205)
+"""Light grey border round the other thumbnails, as a BGR colour."""
 SEAM_COLOUR = (255, 255, 0)
+"""Cyan for the seam points and line, as a BGR colour."""
 OUTLINE = (0, 0, 0)
+"""Black edging so the seam points and line show on a white seam, as a BGR colour."""
 
 # waitKeyEx codes for the arrow keys on Windows, Linux (GTK and Qt) and macOS.
 LEFT_KEYS = {0x250000, 0xFF51, 0xF702}
+"""Codes waitKeyEx gives for the left arrow key on Windows, Linux and macOS."""
 RIGHT_KEYS = {0x270000, 0xFF53, 0xF703}
+"""Codes waitKeyEx gives for the right arrow key on Windows, Linux and macOS."""
 ESC, ENTER, LINE_FEED = 27, 13, 10
 
 
@@ -71,6 +101,7 @@ def fold_line_angle(angle_deg: float) -> float:
 
 
 def _direction_deg(start: Coord, end: Coord) -> float | None:
+    """Return the direction from start to end in degrees, or None if they coincide."""
     dx, dy = end.x - start.x, end.y - start.y
     if dx == 0 and dy == 0:
         return None
@@ -118,6 +149,7 @@ class BallImage:
     travel_direction_deg: float | None   # direction of travel at this frame
 
     def load(self) -> np.ndarray:
+        """Load the crop from its image file."""
         return _read_image(self.path)
 
     def to_frame(self, x: float, y: float) -> tuple[float, float]:
@@ -140,10 +172,12 @@ class SeamMeasurement:
 
     @property
     def frame_number(self) -> int:
+        """Return the frame number of the ball image the seam is on."""
         return self.image.frame_number
 
     @property
     def length_px(self) -> float:
+        """Return the length of the seam line, in px."""
         return math.hypot(self.end[0] - self.start[0], self.end[1] - self.start[1])
 
     @property
@@ -312,6 +346,7 @@ def _clear_earlier_run(folder: Path) -> None:
 
 def _write_index(folder: Path, video_path: str, rotation: int, crop_scale: float,
                  ball_images: list[BallImage]) -> None:
+    """Write the index file that load_ball_images reads the ball images back from."""
     index = {
         "video": str(video_path),
         "rotation_deg": int(rotation),
@@ -331,6 +366,7 @@ def _write_index(folder: Path, video_path: str, rotation: int, crop_scale: float
 
 
 def _write_image(path: Path, image: np.ndarray) -> None:
+    """Save an image to path, in the image format of its file extension."""
     # imencode and write_bytes instead of cv2.imwrite, which fails on Windows
     # when the folder name has characters outside the system code page.
     ok, encoded = cv2.imencode(path.suffix, image)
@@ -340,6 +376,7 @@ def _write_image(path: Path, image: np.ndarray) -> None:
 
 
 def _read_image(path: Path) -> np.ndarray:
+    """Load the colour image at path."""
     image = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError(f"Could not read {path}")
@@ -360,6 +397,7 @@ class SeamAngleDetector(ABC):
     """
 
     method = ""
+    """Name of the method, saved with each seam and used in the seam file name."""
 
     @abstractmethod
     def detect(self, ball_images: list[BallImage]) -> SeamMeasurement | None:
@@ -370,8 +408,10 @@ class ManualSeamAngleDetector(SeamAngleDetector):
     """Opens a window to scroll through the ball images and click the seam on one of them."""
 
     method = "manual"
+    """Method name for seams picked by hand."""
 
     def detect(self, ball_images: list[BallImage]) -> SeamMeasurement | None:
+        """Open the seam picker on ball_images and return the seam used, or None."""
         if not ball_images:
             print("There are no ball images to pick the seam from.")
             return None
@@ -391,8 +431,10 @@ class SeamPicker:
     """
 
     window_name = "Cricket Ball Tracker - Seam Angle"
+    """Title of the seam picker window."""
 
     def __init__(self, ball_images: list[BallImage], method: str = "manual"):
+        """Set up the picker for ball_images, loading crops and making thumbnails."""
         self.images = ball_images
         self.method = method
         self.crops = [image.load() for image in ball_images]
@@ -437,6 +479,7 @@ class SeamPicker:
                 pass
 
     def _print_controls(self) -> None:
+        """Print the instructions and controls for the window."""
         print("\n=== CRICKET BALL TRACKER - SEAM ANGLE ===")
         print(f"{len(self.images)} ball images. Scroll to the one where the seam is clearest "
               "and click two points along the seam.")
@@ -491,6 +534,7 @@ class SeamPicker:
         return None
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, _param: object) -> None:
+        """Handle mouse moves, the wheel and clicks on the ball or a thumbnail."""
         # x and y are canvas pixels: OpenCV scales them back if the window is resized.
         if event == cv2.EVENT_MOUSEMOVE:
             self.mouse = (x, y)
@@ -508,6 +552,7 @@ class SeamPicker:
     # --------------------------------------------------------------- state
 
     def show(self, index: int) -> None:
+        """Show the ball image at index, stopping at the first and last image."""
         self.index = min(max(index, 0), len(self.images) - 1)
 
     def add_seam_point(self, x: float, y: float) -> None:
@@ -527,16 +572,19 @@ class SeamPicker:
             print("Press S to use it, or click again to start over.")
 
     def undo(self) -> None:
+        """Remove the last seam point."""
         if self.seam_points:
             self.seam_points.pop()
         if not self.seam_points:
             self.seam_index = None
 
     def reset(self) -> None:
+        """Clear the seam points."""
         self.seam_points = []
         self.seam_index = None
 
     def seam_ready(self) -> bool:
+        """Return True once two seam points more than 0.5 px apart are in."""
         seam = self.measurement()
         return seam is not None and seam.length_px > 0.5
 
@@ -560,6 +608,7 @@ class SeamPicker:
 
     @staticmethod
     def _print_seam(prefix: str, seam: SeamMeasurement) -> None:
+        """Print a seam's angle, seam line angle and direction of travel."""
         print(f"{prefix} on frame {seam.frame_number}: seam angle {_format_angle(seam.seam_angle_deg)} "
               f"(seam line {_format_angle(seam.raw_angle_deg)}, "
               f"direction of travel {_format_angle(seam.image.travel_direction_deg)})")
@@ -581,6 +630,7 @@ class SeamPicker:
                 int(round((y + 0.5) * view_per_crop - 0.5)))
 
     def _thumbnail_at(self, x: int, y: int) -> int | None:
+        """Return the index of the image whose thumbnail is at (x, y), or None."""
         if not STRIP_Y <= y < STRIP_Y + THUMB_SIZE:
             return None
         for left, index in self._thumbnail_slots:
@@ -591,6 +641,7 @@ class SeamPicker:
     # -------------------------------------------------------------- drawing
 
     def render(self) -> np.ndarray:
+        """Draw the whole window and return it as an image."""
         canvas = np.full((CANVAS_HEIGHT, CANVAS_WIDTH, 3), BACKGROUND, dtype=np.uint8)
         view = cv2.resize(self.crops[self.index], (VIEW_SIZE, VIEW_SIZE),
                           interpolation=cv2.INTER_LINEAR)
@@ -603,6 +654,7 @@ class SeamPicker:
         return canvas
 
     def _draw_seam(self, view: np.ndarray, image: BallImage) -> None:
+        """Draw the seam points and line, or a line to the mouse, on the view."""
         if self.seam_index != self.index or not self.seam_points:
             return
         points = [self._crop_to_view(image, x, y) for x, y in self.seam_points]
@@ -663,6 +715,7 @@ class SeamPicker:
 
     @staticmethod
     def _crop_to_thumbnail(image: BallImage, x: float, y: float) -> tuple[int, int]:
+        """Convert a crop pixel to a thumbnail pixel, for drawing."""
         thumb_per_crop = THUMB_SIZE / image.size_px
         return (int(round((x + 0.5) * thumb_per_crop - 0.5)),
                 int(round((y + 0.5) * thumb_per_crop - 0.5)))
@@ -671,6 +724,7 @@ class SeamPicker:
 # ---------------------------------------------------------------- helpers
 
 def _inside_view(x: int, y: int) -> bool:
+    """Return whether canvas pixel (x, y) is on the enlarged ball image."""
     return VIEW_X <= x < VIEW_X + VIEW_SIZE and VIEW_Y <= y < VIEW_Y + VIEW_SIZE
 
 
@@ -685,10 +739,12 @@ def _wheel_delta(flags: int) -> int:
 
 def _text(canvas: np.ndarray, text: str, x: int, y: int, scale: float,
           colour: tuple[int, int, int]) -> None:
+    """Draw text on canvas with its baseline starting at (x, y)."""
     cv2.putText(canvas, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, colour, 1, cv2.LINE_AA)
 
 
 def _format_angle(angle: float | None) -> str:
+    """Format an angle in degrees with its sign, or a dash when it is None."""
     return "-" if angle is None else f"{angle:+.2f} deg"
 
 

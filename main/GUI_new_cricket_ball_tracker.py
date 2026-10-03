@@ -1,3 +1,11 @@
+"""The cricket ball tracker's main program: a PyQt5 window that calibrates the side-on
+camera and runs the top-down stage, the seam angle step (manual or automatic) and the
+side-on stage on worker threads.
+
+Results are saved to a chosen folder and shown in the Log, Swing, Trajectory, Results
+and Coordinates tabs.
+"""
+
 from __future__ import annotations
 
 import builtins
@@ -64,15 +72,23 @@ from library.results import ResultRow, load_coordinates, load_results
 
 
 SAVE_DIR = str(paths.DELIVERY_DIR)
+"""Save folder the window starts with."""
 TOP_DOWN_VALUE_FILE = "top_down_analysis"
+"""File name of the top-down results in the save folder, without the .yaml extension."""
 SWING_PLOT_FILE = "swing"
+"""File name of the swing plot in the save folder; matplotlib adds the .png."""
 TRAJECTORY_PLOT_FILE = "trajectory_3d"
+"""File name of the 3D trajectory plot in the save folder; matplotlib adds the .png."""
 CALIBRATION_PATH = str(paths.CALIBRATION_PATH)
+"""Side-on camera calibration file the window starts with."""
 
 VIDEO_FILTER = "Video files (*.mp4 *.avi *.mov *.mkv);;All files (*.*)"
+"""File-type filter for the video file dialogs."""
 CALIBRATION_FILTER = "Calibration files (*.npz);;All files (*.*)"
+"""File-type filter for the calibration file dialog."""
 
 MONOSPACE = QFont("Menlo" if sys.platform == "darwin" else "Consolas", 10)
+"""Fixed-width font for the log and the numbers (Menlo on macOS, Consolas elsewhere)."""
 
 
 def resolve_plot_path(save_path):
@@ -99,6 +115,7 @@ class PromptRouter(QObject):
     prompt_requested = pyqtSignal(object)
 
     def __init__(self, parent=None):
+        """Set up an empty script and history, queueing dialogs to the GUI thread."""
         super().__init__(parent)
         self._scripted: list[tuple[str, str]] = []
         self._original_input = None
@@ -126,6 +143,7 @@ class PromptRouter(QObject):
         self._scripted.clear()
 
     def __call__(self, prompt=""):
+        """Answer an input() prompt from the script, or else by asking in a dialog."""
         text = str(prompt)
         answer = self._take_scripted(text)
         if answer is None:
@@ -136,6 +154,7 @@ class PromptRouter(QObject):
         return answer
 
     def _take_scripted(self, prompt):
+        """Pop the first scripted answer whose needle is in prompt, or return None."""
         lowered = prompt.lower()
         for index, (needle, answer) in enumerate(self._scripted):
             if needle in lowered:
@@ -144,6 +163,7 @@ class PromptRouter(QObject):
         return None
 
     def _ask(self, prompt):
+        """Return the answer from a GUI-thread dialog; raise SystemExit if cancelled."""
         request = {"prompt": prompt, "answer": "", "ok": False,
                    "event": threading.Event()}
         app = QApplication.instance()
@@ -177,19 +197,23 @@ class ScriptedDisplay:
     """
 
     def __init__(self, main_path="", main_start=0, side_path="", side_start=0):
+        """Set up the chosen top-down and side-on video paths and their start frames."""
         self.main_path = main_path
         self.main_start = int(main_start)
         self.side_path = side_path
         self.side_start = int(side_start)
 
     def load_main_video(self) -> Video:
+        """Return the chosen top-down video, at its start frame."""
         return self._open(self.main_path, self.main_start, "top-down")
 
     def load_side_video(self) -> Video:
+        """Return the chosen side-on video, at its start frame."""
         return self._open(self.side_path, self.side_start, "side-on")
 
     @staticmethod
     def _open(path, start_frame, label) -> Video:
+        """Return the video at path set to start_frame; raise ValueError if no path."""
         if not path:
             raise ValueError(f"No {label} video was chosen.")
         print(f"Loading {label} video: {path}")
@@ -212,10 +236,12 @@ class TaskThread(QThread):
     cancelled = pyqtSignal(str)
 
     def __init__(self, step, parent=None):
+        """Set up the thread to run step, a function with no arguments."""
         super().__init__(parent)
         self._step = step
 
     def run(self):
+        """Run the step and emit done, cancelled or failed, depending on how it ends."""
         try:
             self.done.emit(self._step())
         except SystemExit as exit_signal:
@@ -322,6 +348,7 @@ class ImageView(QLabel):
     """A QLabel that keeps a plot readable as the panel is resized."""
 
     def __init__(self, placeholder):
+        """Set up the view with grey placeholder text until a plot is shown."""
         super().__init__(placeholder)
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(1, 1)
@@ -329,6 +356,7 @@ class ImageView(QLabel):
         self._source = None
 
     def set_image(self, path):
+        """Show the image at path scaled to fit, or a message if it cannot be loaded."""
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
             self._source = None
@@ -338,10 +366,12 @@ class ImageView(QLabel):
         self._rescale()
 
     def resizeEvent(self, event):
+        """Rescale the image to the new size."""
         super().resizeEvent(event)
         self._rescale()
 
     def _rescale(self):
+        """Scale the image to fit the view, keeping its aspect ratio."""
         if self._source is not None:
             self.setPixmap(self._source.scaled(self.size(), Qt.KeepAspectRatio,
                                                Qt.SmoothTransformation))
@@ -351,21 +381,25 @@ class ElidedLabel(QLabel):
     """One line of text, shortened in the middle when it does not fit, with all of it as the tooltip."""
 
     def __init__(self):
+        """Set up an empty grey label whose width does not depend on its text."""
         super().__init__()
         self._full_text = ""
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setStyleSheet("color: #888780;")
 
     def set_full_text(self, text):
+        """Set the full text and tooltip, and show as much of the text as fits."""
         self._full_text = text
         self.setToolTip(text)
         self._elide()
 
     def resizeEvent(self, event):
+        """Shorten the text again to fit the new width."""
         super().resizeEvent(event)
         self._elide()
 
     def _elide(self):
+        """Show the full text, shortened in the middle to fit the label's width."""
         self.setText(self.fontMetrics().elidedText(self._full_text, Qt.ElideMiddle, max(self.width(), 1)))
 
 
@@ -373,6 +407,9 @@ class MainWindow(QMainWindow):
     """Controls on the left, log and plots on the right."""
 
     def __init__(self):
+        """Set up the window, send input() prompts to dialogs and printed text to the
+        log, and show any results already in the save folder.
+        """
         super().__init__()
         self.setWindowTitle("Cricket ball tracker")
         self.resize(1360, 860)
@@ -404,6 +441,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ build
 
     def _build_controls(self):
+        """Build the left panel of inputs, step buttons and result readouts."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
@@ -486,6 +524,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _with_browse(line_edit, handler):
+        """Return line_edit in a row with a small browse button that calls handler."""
         row = QWidget()
         box = QHBoxLayout(row)
         box.setContentsMargins(0, 0, 0, 0)
@@ -497,6 +536,7 @@ class MainWindow(QMainWindow):
         return row
 
     def _build_views(self):
+        """Build the Log, Swing, Trajectory, Results and Coordinates tabs."""
         self.tabs = QTabWidget()
 
         self.log = QPlainTextEdit()
@@ -586,21 +626,26 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------- browse
 
     def browse_top_down(self):
+        """Ask the user for the top-down video."""
         self._browse_into(self.top_down_path, "Choose the top-down video", VIDEO_FILTER)
 
     def browse_side_on(self):
+        """Ask the user for the side-on video."""
         self._browse_into(self.side_on_path, "Choose the side-on video", VIDEO_FILTER)
 
     def browse_calibration(self):
+        """Ask the user for a calibration file."""
         self._browse_into(self.calibration_path, "Choose a calibration file",
                           CALIBRATION_FILTER)
 
     def _browse_into(self, line_edit, title, file_filter):
+        """Ask the user for a file and put its path in line_edit."""
         path, _ = QFileDialog.getOpenFileName(self, title, line_edit.text(), file_filter)
         if path:
             line_edit.setText(path)
 
     def browse_save_dir(self):
+        """Ask the user for a save folder and show the results already in it."""
         path = QFileDialog.getExistingDirectory(self, "Choose an output folder",
                                                 self.save_dir.text())
         if path:
@@ -642,6 +687,7 @@ class MainWindow(QMainWindow):
                   "Calibrating")
 
     def _calibration_finished(self, written, previous_mtime):
+        """Use the new calibration file if one was saved, and say whether it was."""
         if written.exists() and written.stat().st_mtime > previous_mtime:
             self.calibration_path.setText(str(written))
             self.append_log(f"Calibration saved to {written}")
@@ -657,6 +703,7 @@ class MainWindow(QMainWindow):
         return ManualSeamAngleDetector()
 
     def start_top_down(self):
+        """Run the top-down stage and the seam angle step on a worker thread."""
         if not self._require(self.top_down_path, "Choose a top-down video first."):
             return
         display = ScriptedDisplay(main_path=self.top_down_path.text(),
@@ -668,6 +715,7 @@ class MainWindow(QMainWindow):
                   self._top_down_finished, "Tracking top-down")
 
     def _top_down_finished(self, data):
+        """Show the top-down results and any seam warning; set the Delivery speed."""
         self.velocity.setValue(data["velocity"])
         self.readouts["Velocity"].setText(f"{data['velocity']:.2f} km/h")
         angle = data["seam_angle"]
@@ -680,6 +728,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Cricket ball tracker", data["seam_warning"])
 
     def start_side_on(self):
+        """Run the side-on stage on a worker thread, using the Delivery speed."""
         if not self._require(self.side_on_path, "Choose a side-on video first."):
             return
         if not self._require(self.calibration_path, "Choose a calibration file first."):
@@ -699,6 +748,7 @@ class MainWindow(QMainWindow):
                   self._side_on_finished, "Tracking side-on")
 
     def _side_on_finished(self, data):
+        """Show the side-on readouts and plots, and reload the saved results."""
         self.side_on_data = data
         self.engine, self.result = data["engine"], data["result"]
         self._show_results(self.result)
@@ -723,6 +773,7 @@ class MainWindow(QMainWindow):
         seam_detector = self._seam_detector()
 
         def both():
+            """Track top-down, ask which speed to use, then track side-on."""
             top_down = track_top_down(display, save_dir, TOP_DOWN_VALUE_FILE, seam_detector)
             speed = float(router(f"Top down velocity was calculated to be "
                                  f"{top_down['velocity']:.2f} km/h. "
@@ -735,6 +786,7 @@ class MainWindow(QMainWindow):
         self._run(both, self._both_finished, "Running both stages")
 
     def _both_finished(self, data):
+        """Show both stages' results, with the Delivery speed set to the speed used."""
         self._top_down_finished(data["top_down"])
         self.velocity.setValue(data["velocity"])
         self._side_on_finished(data["side_on"])
@@ -743,6 +795,7 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------- results
 
     def _show_results(self, result):
+        """Show the side-on point count, swing and fit residuals in the readouts."""
         self.readouts["Tracked points"].setText(str(len(result.trajectory.frames)))
         self.readouts["Swing at last point"].setText(
             f"{result.swing_at_last_point_cm:+.2f} cm "
@@ -785,6 +838,7 @@ class MainWindow(QMainWindow):
         self.coordinates_status.set_full_text(table.message or f"{len(table.rows)} frames, from {table.path}")
 
     def _add_result_row(self, parent, row: ResultRow):
+        """Add row and its children under parent; collapse any with over 12 children."""
         item = QTreeWidgetItem([row.name, row.value])
         item.setFont(1, MONOSPACE)
         parent.addChild(item)
@@ -847,6 +901,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- plumbing
 
     def _require(self, line_edit, message):
+        """Return whether line_edit has text, showing message if it is empty."""
         if line_edit.text().strip():
             return True
         QMessageBox.information(self, "Cricket ball tracker", message)
@@ -868,32 +923,38 @@ class MainWindow(QMainWindow):
         self.task.start()
 
     def _on_failed(self, message):
+        """Log the traceback, unlock the buttons and show the error's last line."""
         self.append_log(message)
         self._set_busy(False, "Failed. See the log.")
         QMessageBox.critical(self, "Cricket ball tracker",
                              message.strip().splitlines()[-1])
 
     def _on_cancelled(self, message):
+        """Log the cancellation and unlock the buttons."""
         self.append_log(f"Cancelled: {message}")
         self._set_busy(False, "Cancelled.")
 
     def _set_busy(self, busy, message):
+        """Lock or unlock the step buttons and show message in the status bar."""
         for button in self.step_buttons:
             button.setEnabled(not busy)
         self.statusBar().showMessage(message)
 
     def append_log(self, text):
+        """Add text to the Log tab and scroll to the end."""
         self.log.appendPlainText(text)
         scrollbar = self.log.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
     def closeEvent(self, event):
+        """Give input() and sys.stdout back before the window closes."""
         self.router.remove()
         sys.stdout = sys.__stdout__
         super().closeEvent(event)
 
 
 def main():
+    """Open the tracker window and run it until it is closed."""
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

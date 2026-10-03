@@ -1,3 +1,5 @@
+"""Worked example of the side-on physics engine on one delivery's clicked points."""
+
 import sys
 from pathlib import Path
 
@@ -14,10 +16,15 @@ from library.physics_engines.side_on_physics_engine import SideOnPhysicsEngine, 
 
 
 CALIBRATION_PATH = str(paths.CALIBRATION_PATH)
+"""Side-on camera calibration file the demo uses."""
 FPS = 240.0
+"""Frame rate of the side-on video the points were clicked on, in fps."""
 SPEED_KMH = 120.0
+"""Delivery speed used to reconstruct the delivery, in km/h."""
 SAVE_DIRECTORY = str(paths.DELIVERY_DIR)
+"""Folder the demo writes tracked_points.csv and side_on_analysis.yaml to."""
 DISPLAY_3D_PLOT = False
+"""Whether to open the interactive 3D trajectory plot at the end."""
 
 POINTS = [
     (724, 895, 386), (725, 908, 389), (726, 919, 392), (727, 930, 394),
@@ -35,6 +42,7 @@ POINTS = [
     (772, 1117, 459), (773, 1119, 460), (774, 1120, 461), (775, 1122, 462),
     (776, 1123, 463), (777, 1125, 464),
 ]
+"""Clicked ball centres of the delivery, as (frame, u, v) with u and v in px."""
 
 
 def main():

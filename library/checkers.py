@@ -1,7 +1,13 @@
+"""Checks on the clicked calibrations and seam angles."""
+
 import math
 
 class Checker:
+    """Checks that flag inconsistent calibrations and a wobbling seam."""
     def _check_calibration_difference(self, calibrations, ball_diameter_m):
+        """Return the % difference between the two calibrations' m/px and whether it is
+        25% or more, or (None, False) without two usable calibrations.
+        """
         if len(calibrations) != 2:
             return None, False
         meters_per_pixel_values = []
@@ -23,6 +29,9 @@ class Checker:
         return percent_diff, is_invalid
     
     def _check_seam_wobble(self, seam_measurements):
+        """Return the mean seam angle (or "Wobble Seam" if consecutive angles differ by
+        over 10 degrees), the wobble flag and the largest difference.
+        """
         if not seam_measurements:
             return None, False, 0.0
         if len(seam_measurements) == 1:

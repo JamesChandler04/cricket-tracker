@@ -1,3 +1,7 @@
+"""Shows the speed, seam angle, initial trajectory angle and final swing saved in
+output/new data.xlsx.
+"""
+
 import pandas as pd
 from PyQt5.QtWidgets import QApplication, QWidget, QMainWindow, QPushButton
 from PyQt5.QtCore import Qt, QRect
@@ -23,7 +27,9 @@ swing = df['Parameters'].loc[df['Parameters']['Parameter'] == 'Final Swing (m)',
 # print(f"Final Swing: {swing}")
 
 class MainWindow(QMainWindow):
+    """Fixed-size window showing the four values side by side in blue boxes."""
     def __init__(self):
+        """Set up a titled blue box for each value, spaced evenly across the window."""
         super().__init__()
 
         self.setWindowTitle("Delivery Parameters Viewer")

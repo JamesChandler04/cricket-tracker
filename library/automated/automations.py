@@ -1,3 +1,10 @@
+"""Earlier automatic ball detection for both videos (colour masks, background
+subtraction, Hough circles and a saturation test to reject skin), with a top-down seam
+finder.
+
+Only the old programs use it; the current program has the ball clicked by hand.
+"""
+
 import cv2
 import numpy as np
 import os
@@ -16,51 +23,59 @@ from library import paths
 
 # Output folders for debug and tracking images
 top_down_tracking_folder = str(paths.TOP_DOWN_TRACKING_DIR)
+"""Folder for the top-down detector's debug images and the frames with the ball."""
 side_on_tracking_folder = str(paths.SIDE_ON_TRACKING_DIR)
+"""Folder for the side-on detector's debug images and the frames with the ball."""
 
 CONFIG_PATH = str(paths.CONFIG_PATH)
+"""Path of config.yml, read for the optional search bounding boxes."""
 
 # Set to 1 to process every frame. Skips frames until ball is found, then backtracks and processes every frame until the last frame with the ball.
 TOP_DOWN_FRAME_SKIP = 1
+"""Frame step while searching the top-down video for the ball; 1 checks every frame."""
 SIDE_ON_FRAME_SKIP = 1
+"""Frame step while searching the side-on video for the ball; 1 checks every frame."""
 
 # Ball size (radius in pixels)
-TOP_DOWN_BALL_RADIUS = 69   # measured: locked-on ball is 138 px across -> r = 69
+TOP_DOWN_BALL_RADIUS = 69
+"""Expected top-down ball radius, in px; a locked-on ball measured 138 px across."""
 SIDE_ON_BALL_RADIUS  = 30
+"""Expected side-on ball radius at full resolution, in px."""
 
-# Strictness knob for the top-down size gate. Smaller = stricter.
-# Both detection paths (Hough + contour) only accept radii within
-# TOP_DOWN_BALL_RADIUS +/- TOP_DOWN_MAX_DIFFERENCE.
 TOP_DOWN_MAX_DIFFERENCE = 15
-TOP_DOWN_MIN_RADIUS = TOP_DOWN_BALL_RADIUS - TOP_DOWN_MAX_DIFFERENCE   # 54
-TOP_DOWN_MAX_RADIUS = TOP_DOWN_BALL_RADIUS + TOP_DOWN_MAX_DIFFERENCE   # 84
+"""How far a top-down candidate's radius may be from TOP_DOWN_BALL_RADIUS, in px, in
+both the Hough and contour paths. Smaller is stricter.
+"""
+TOP_DOWN_MIN_RADIUS = TOP_DOWN_BALL_RADIUS - TOP_DOWN_MAX_DIFFERENCE
+"""Smallest top-down ball radius accepted, in px (54)."""
+TOP_DOWN_MAX_RADIUS = TOP_DOWN_BALL_RADIUS + TOP_DOWN_MAX_DIFFERENCE
+"""Largest top-down ball radius accepted, in px (84)."""
 
-# Thickness of the detection circle drawn on debug images (pixels)
 DETECTION_CIRCLE_THICKNESS = 4
+"""Line thickness of the circle drawn round the found ball on debug images, in px."""
 
-# Ball colour HSV ranges (red). Kept LOOSE on purpose so the full ball is captured
-# even when motion blur desaturates its edges. Skin (red in hue but pale) is NOT
-# rejected here any more -- that happens per-candidate via the blob-level median
-# saturation test (TOP_DOWN_MIN_MEDIAN_SAT) in find_ball.
 TOP_DOWN_BALL_COLOR_RANGES = [
     (np.array([0,   70, 20]), np.array([14,  255, 255])),
     (np.array([166, 70, 20]), np.array([180, 255, 255]))
 ]
-
-# A real ball blob is vividly saturated THROUGHOUT (median S ~140-190); the bowler's
-# skin is dull (median S <=117). A candidate whose median saturation is below this is
-# rejected as skin. 
+"""Loose HSV ranges for the red ball in the top-down video, so edges desaturated by
+motion blur are kept. Skin is rejected later, per candidate, by TOP_DOWN_MIN_MEDIAN_SAT.
+"""
 
 TOP_DOWN_MIN_MEDIAN_SAT = 120
+"""Lowest median HSV saturation a top-down candidate may have before it is rejected as
+skin. The ball measures about 140-190 and skin 117 or less.
+"""
 
-# Seam colour HSV range (white)
 SEAM_COLOUR_RANGE = (np.array([0, 0, 100]), np.array([180, 70, 255]))
+"""HSV range for the white seam inside the top-down ball, as (lower, upper)."""
 
 
 SIDE_ON_BALL_COLOR_RANGES = [
     (np.array([0,   120,  80]), np.array([10,  255, 255])),
     (np.array([170, 120,  80]), np.array([180, 255, 255]))
 ]
+"""HSV ranges for the red ball in the side-on video."""
 
 
 def _load_bounding_box(view: str) -> Optional[tuple[int, int, int, int]]:
@@ -97,12 +112,20 @@ def _apply_bounding_box(frame, background_frame, bbox):
     return frame[ys:ye, xs:xe], background_frame[ys:ye, xs:xe], xs, ys
 
 class BallPosition(Enum):
+    """Stage of a video scan: ball not found yet, found, or lost again."""
     BEFORE_FRAME = 0
+    """Ball not found in any frame yet."""
     IN_FRAME = 1
+    """Ball found in the latest frame."""
     AFTER_FRAME = 2
+    """Ball lost after being found, which ends the scan."""
 
 class TopDownBallFinder:
+    """Automatic finder for the ball and its seam in the top-down video."""
     def get_ball_data(self, video: Video) -> list[TopDownBallDataPoint]:
+        """Scan the video from its current frame and return the ball and seam in each
+        frame until the ball is lost, saving those frames as images.
+        """
         ball_data_points: list[TopDownBallDataPoint] = []
 
         # Skip frames until first ball is found
@@ -149,6 +172,9 @@ class TopDownBallFinder:
         return ball_data_points
 
     def find_ball(self, frame, background_frame) -> Optional[TopDownBallData]:
+        """Find the ball by motion against the background frame, red colour and circle
+        shape, and return its box and centre in px (seam fields set to -1), or None.
+        """
         if frame is None or background_frame is None:
             return None
 
@@ -300,6 +326,9 @@ class TopDownBallFinder:
         )
 
     def find_seam(self, ball_data: TopDownBallData, frame) -> Optional[TopDownBallData]:
+        """Return the ball data with the seam ends and angle in degrees set from the
+        longest white line in the ball, or with the angle -1 if there is none.
+        """
         x0 = max(0, ball_data.top_left.x)
         y0 = max(0, ball_data.top_left.y)
         x1 = min(frame.shape[1], ball_data.bottom_right.x)
@@ -413,7 +442,11 @@ class TopDownBallFinder:
 
 
 class SideOnBallFinder:
+    """Automatic ball finder for the side-on video."""
     def get_ball_data(self, video: Video) -> list[SideOnBallDataPoint]:
+        """Scan the video from its current frame and return the ball in each frame until
+        it is lost, saving those frames as images.
+        """
         ball_data_points: list[SideOnBallDataPoint] = []
 
         while video.get_current_frame_number() < video.total_frames - 1:
@@ -451,6 +484,9 @@ class SideOnBallFinder:
         return ball_data_points
 
     def find_ball(self, current_frame, background_frame) -> Optional[SideOnBallData]:
+        """Find the ball by motion against the background frame, red colour and circle
+        shape, and return its box and centre in px, or None.
+        """
         if current_frame is None or background_frame is None:
             return None
 

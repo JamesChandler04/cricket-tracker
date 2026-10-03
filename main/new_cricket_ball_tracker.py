@@ -1,3 +1,8 @@
+"""Old file: text-based version of the cricket ball tracker.
+
+Kept for reference only; the current program is main/GUI_new_cricket_ball_tracker.py.
+"""
+
 import sys
 import yaml
 from pathlib import Path
@@ -12,15 +17,28 @@ from library.physics_engines.top_down_physics_engine import SelectionType, TopDo
 from library.physics_engines.side_on_physics_engine import SideOnPhysicsEngine
 
 SAVE_DIR = str(paths.DELIVERY_DIR)
+"""Folder the delivery's results and plots are saved in."""
 TOP_DOWN_VALUE_FILE = "top_down_analysis"
+"""File name of the top-down results in the save folder, without the .yaml extension."""
 SIDE_ON_VALUE_FILE = "side_on_analysis"
+"""Unused name for the side-on results file; the side-on engine names its own files."""
 SWING_PLOT_FILE = "swing"
+"""File name of the swing plot in the save folder, without the .png matplotlib adds."""
 TRAJECTORY_PLOT_FILE = "trajectory_3d"
+"""File name of the 3D trajectory plot in the save folder, without the .png matplotlib
+adds.
+"""
 
 CALIBRATION_PATH = str(paths.CALIBRATION_PATH)
+"""Side-on camera calibration file."""
 DISPLAY_3D_PLOT = False
+"""Whether the 3D trajectory plot is shown in a window as well as saved."""
 
 def top_down():
+    """Let the user mark the ball and seam in the top-down video, then print and save
+    the speed and seam angle. Return the mean speed and the speeds between consecutive
+    marked points in km/h, and the seam angle in degrees (or None).
+    """
     # Click points on top-down video
     tracker = TopDownTracker()
     clicked_points = tracker.get_top_down_points()
@@ -43,6 +61,9 @@ def top_down():
     return velocity, velocity_list, seam_angle
 
 def side_on(velocity):
+    """Let the user mark the ball in the side-on video, then print and save its 3D path,
+    swing and plots, at the given speed in km/h or one the user enters.
+    """
     print(f"Top down velocity was calculated to be {velocity:.2f} km/h")
     auto_vel = input("Do you want to use this calculated velocity? (y/n)\n")
     if auto_vel == "n":

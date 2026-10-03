@@ -1,7 +1,13 @@
+"""Calculations on clicked points: metres per pixel, side-on focal length, seam angle
+and initial direction.
+"""
+
 import math
 
 class Calculators:
+    """Calculations on the points clicked in the tracker windows."""
     def _calculate_meters_per_pixel(self, calibrations, ball_diameter_m, meters_per_pixel):
+        """Return the calibrations and mean m/px, or None if a pair is unusable."""
         if not calibrations or len(calibrations[-1][1]) != 2:
             return
         meters_per_pixel_values = []
@@ -45,6 +51,9 @@ class Calculators:
         return side_calibration, side_focal_length_px
     
     def _calculate_seam_angle(self, seam_points, seam_measurements, current_frame):
+        """Append a frame's seam angle from two clicked points, in degrees clockwise
+        from image up, and return the measurements and an empty point list.
+        """
         (x1, y1), (x2, y2) = seam_points
         dx = x2 - x1
         dy = y2 - y1
@@ -55,6 +64,9 @@ class Calculators:
         return seam_measurements, seam_points
     
     def _calculate_initial_trajectory(self, frame_positions, frame_height, meters_per_pixel):
+        """Return the initial direction of travel, in degrees from the image vertical (0
+        to 180), or None with under two points.
+        """
         if len(frame_positions) < 2:
             return None
         _, x1, y1, _ = frame_positions[0]

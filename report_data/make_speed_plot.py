@@ -7,17 +7,24 @@ from matplotlib.patches import Rectangle
 import yaml
 
 FOLDER = Path("report_data/")
+"""Folder of the speed data and the saved plot, relative to the working directory."""
 
 RADAR_FILE = FOLDER / "radar_speeds.yaml"
+"""YAML file of radar speeds in km/h, by ball and delivery."""
 ACTUAL_FILE = FOLDER / "actual_top_down_data.csv"
+"""CSV of the top-down measured speeds in km/h, several for each delivery."""
 BALL = 1
+"""Number of the ball whose deliveries are plotted."""
 OUTPUT = FOLDER / f"speeds_ball_{BALL}.png"
+"""PNG file the plot is saved to."""
 
-BOX_WIDTH = 0.6  # width of each min–max rectangle, in delivery units
+BOX_WIDTH = 0.6
+"""Width of each min–max rectangle, in delivery units along the x axis."""
 
 # Rows look like: 1,1,[135, 118, 120, 118],-27
 # The speed list is unquoted, so it can't be read as a normal CSV.
 ROW = re.compile(r"^\s*(\d+)\s*,\s*(\d+)\s*,\s*\[([^\]]*)\]\s*,\s*(-?[\d.]+)\s*$")
+"""Pattern for one row of ACTUAL_FILE."""
 
 
 def load_radar(path, ball):
@@ -47,6 +54,7 @@ def load_actual(path, ball):
 
 
 def main():
+    """Draw the radar and top-down speeds for BALL, save the plot and show it."""
     radar = load_radar(RADAR_FILE, BALL)
     actual = load_actual(ACTUAL_FILE, BALL)
 

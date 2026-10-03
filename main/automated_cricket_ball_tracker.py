@@ -1,3 +1,9 @@
+"""Old file: PyQt5 program that finds the ball automatically in the top-down and side-on
+videos, inside search regions the user draws.
+
+Kept for reference only; the current program is main/GUI_new_cricket_ball_tracker.py.
+"""
+
 import sys
 import os
 import glob
@@ -21,9 +27,12 @@ from library.log_bridge import bridge
 from library.physics_engines import top_down_physics_engine
 
 CONFIG_PATH = str(paths.CONFIG_PATH)
+"""The settings file, config.yml, where the search regions (bounding boxes) are saved.
+"""
 
 
 def load_config() -> dict:
+    """Return the settings in config.yml, or an empty dict if there are none."""
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r") as f:
             return yaml.safe_load(f) or {}
@@ -64,6 +73,7 @@ class SelectableImageLabel(QLabel):
     selection_changed = pyqtSignal(QRect)   # emits rect in *label* coords
 
     def __init__(self, parent=None):
+        """Set up an empty selection and a crosshair cursor."""
         super().__init__(parent)
         self._origin = QPoint()
         self._rect   = QRect()
@@ -72,6 +82,7 @@ class SelectableImageLabel(QLabel):
         self.setCursor(Qt.CrossCursor)
 
     def mousePressEvent(self, event):
+        """Start a new rectangle at a left click."""
         if event.button() == Qt.LeftButton:
             self._origin  = event.pos()
             self._rect    = QRect(self._origin, QSize())
@@ -79,12 +90,14 @@ class SelectableImageLabel(QLabel):
             self.update()
 
     def mouseMoveEvent(self, event):
+        """Stretch the rectangle to the cursor while dragging and emit it."""
         if self._drawing:
             self._rect = QRect(self._origin, event.pos()).normalized()
             self.update()
             self.selection_changed.emit(self._rect)
 
     def mouseReleaseEvent(self, event):
+        """Finish the rectangle when the left button is released and emit it."""
         if event.button() == Qt.LeftButton and self._drawing:
             self._rect    = QRect(self._origin, event.pos()).normalized()
             self._drawing = False
@@ -92,6 +105,7 @@ class SelectableImageLabel(QLabel):
             self.selection_changed.emit(self._rect)
 
     def paintEvent(self, event):
+        """Draw the label, then any selection as a translucent green rectangle."""
         super().paintEvent(event)
         if not self._rect.isNull():
             painter = QPainter(self)
@@ -102,11 +116,13 @@ class SelectableImageLabel(QLabel):
             painter.fillRect(self._rect, fill)
 
     def clear_selection(self):
+        """Remove the drawn rectangle."""
         self._rect = QRect()
         self.update()
 
     @property
     def selection_rect(self) -> QRect:
+        """Return the drawn rectangle, in label coordinates."""
         return self._rect
 
 
@@ -118,6 +134,7 @@ class BoundingBoxDialog(QDialog):
     """
 
     def __init__(self, view_key: str, parent=None):
+        """Set up the dialog for one view, showing its saved search region if any."""
         super().__init__(parent)
         self.view_key     = view_key
         self._orig_pixmap = None   # full-res pixmap of the loaded frame
@@ -191,6 +208,7 @@ class BoundingBoxDialog(QDialog):
     # File loading
 
     def _load_file(self):
+        """Ask the user for a video or image and show it (a video's first frame)."""
         path, _ = QFileDialog.getOpenFileName(
             self, "Load Video or Image", "",
             "Video / Image Files (*.mp4 *.avi *.mov *.mkv *.jpg *.jpeg *.png *.bmp);;All Files (*)"
@@ -222,6 +240,7 @@ class BoundingBoxDialog(QDialog):
         self.coords_label.setText("Draw a rectangle on the image")
 
     def _update_display(self):
+        """Scale the image to fit the label and record where it sits inside it."""
         if self._orig_pixmap is None:
             return
         scaled = self._orig_pixmap.scaled(
@@ -239,12 +258,14 @@ class BoundingBoxDialog(QDialog):
         self.img_label.setPixmap(scaled)
 
     def resizeEvent(self, event):
+        """Rescale the image to the new size."""
         super().resizeEvent(event)
         self._update_display()
 
     # Selection
 
     def _clear_selection(self):
+        """Remove the drawn rectangle and say the selection was cleared."""
         self.img_label.clear_selection()
         self.coords_label.setText("Selection cleared")
 
@@ -284,6 +305,7 @@ class BoundingBoxDialog(QDialog):
         return QRect(QPoint(x1, y1), QPoint(x2, y2)).normalized()
 
     def _confirm(self):
+        """Save the selection as this view's search region in config.yml and close."""
         sel = self.img_label.selection_rect
         if sel.isNull() or sel.width() < 5 or sel.height() < 5:
             QMessageBox.information(
@@ -304,11 +326,13 @@ class BoundingBoxDialog(QDialog):
         self.accept()
 
 class TrackingWorker(QThread):
+    """Background thread that runs the automatic tracking and physics on both videos."""
     finished = pyqtSignal(list, list)  # top_down_frames, side_on_frames
     error = pyqtSignal(str)
 
     def __init__(self, top_down_path: str, side_on_path: str,
                  top_down_tracker, side_on_tracker):
+        """Set up the thread with the two video paths and their ball finders."""
         super().__init__()
         self.top_down_path = top_down_path
         self.side_on_path = side_on_path
@@ -316,6 +340,9 @@ class TrackingWorker(QThread):
         self.side_on_tracker = side_on_tracker
 
     def run(self):
+        """Clear old tracking images, find the ball in both videos, print the tracking
+        and physics results, then emit the saved frame images or the error message.
+        """
         try:
             # Clear output folders from any previous run
             for folder in (automations.top_down_tracking_folder, automations.side_on_tracking_folder):
@@ -374,6 +401,7 @@ class FrameViewer(QWidget):
     """A labelled image viewer with prev/next navigation."""
 
     def __init__(self, title: str, parent=None):
+        """Set up the viewer with a title, an image area and Prev/Next buttons."""
         super().__init__(parent)
         self._frames: list[str] = []
         self._index: int = 0
@@ -423,6 +451,7 @@ class FrameViewer(QWidget):
         self._set_empty()
 
     def load_frames(self, paths: list[str]):
+        """Show the given frame images, starting with the first."""
         self._frames = paths
         self._index = 0
         if paths:
@@ -431,6 +460,7 @@ class FrameViewer(QWidget):
             self._set_empty()
 
     def _set_empty(self):
+        """Show "No frames" and disable the Prev/Next buttons."""
         self.image_label.setText("No frames")
         self.image_label.setStyleSheet(
             "background-color: #1a1a1a; border: 1px solid #555; color: #666;")
@@ -439,6 +469,7 @@ class FrameViewer(QWidget):
         self.next_btn.setEnabled(False)
 
     def _show_current(self):
+        """Show the current frame and its number, and update the Prev/Next buttons."""
         path = self._frames[self._index]
         pixmap = QPixmap(path)
         if pixmap.isNull():
@@ -459,22 +490,29 @@ class FrameViewer(QWidget):
         self.next_btn.setEnabled(self._index < total - 1)
 
     def prev_frame(self):
+        """Show the previous frame, if there is one."""
         if self._index > 0:
             self._index -= 1
             self._show_current()
 
     def next_frame(self):
+        """Show the next frame, if there is one."""
         if self._index < len(self._frames) - 1:
             self._index += 1
             self._show_current()
 
     def resizeEvent(self, event):
+        """Rescale the current frame to the new size."""
         super().resizeEvent(event)
         if self._frames:
             self._show_current()
 
 class Application(QMainWindow):
+    """Main window for choosing the two videos and their search regions, running the
+    automatic tracking and browsing the frames where the ball was found.
+    """
     def __init__(self):
+        """Set up the window and ball finders, and send printed text to the log."""
         super().__init__()
         self.top_down_video_path = None
         self.side_on_video_path = None
@@ -489,6 +527,9 @@ class Application(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
+        """Build the video pickers, search-region buttons, log, frame viewers and Start
+        Tracking button.
+        """
         self.setWindowTitle("Cricket Ball Tracker")
         self.setMinimumSize(1600, 900)
         self.setStyleSheet("background-color: #f0f0f0;")
@@ -640,6 +681,9 @@ class Application(QMainWindow):
             btn.setToolTip("Draw a bounding box to restrict where the ball is searched for")
 
     def _open_bbox_dialog(self, view_key: str):
+        """Open the search-region dialog for one view and, once confirmed, update its
+        button and log the region.
+        """
         dlg = BoundingBoxDialog(view_key, self)
         if dlg.exec_() == QDialog.Accepted:
             # Refresh button style to reflect newly saved box
@@ -655,6 +699,7 @@ class Application(QMainWindow):
     # File selection
 
     def select_top_down_video(self):
+        """Ask the user for the top-down video and show its file name."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Top Down View Video", "",
             "Video Files (*.mp4 *.avi *.mov *.mkv);;All Files (*)")
@@ -665,6 +710,7 @@ class Application(QMainWindow):
                 "background-color: white; padding: 10px; border: 1px solid #ccc;")
 
     def select_side_on_video(self):
+        """Ask the user for the side-on video and show its file name."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Side On View Video", "",
             "Video Files (*.mp4 *.avi *.mov *.mkv);;All Files (*)")
@@ -677,6 +723,7 @@ class Application(QMainWindow):
     # Tracking
 
     def start_tracking(self):
+        """Start the tracking thread, or show a warning if a video is missing."""
         if not self.top_down_video_path or not self.side_on_video_path:
             self.top_down_video_display.setText("Please select both videos.")
             self.top_down_video_display.setStyleSheet(
@@ -697,6 +744,7 @@ class Application(QMainWindow):
         self._worker.start()
 
     def on_tracking_finished(self, top_down_frames: list, side_on_frames: list):
+        """Re-enable the Start button and show the saved frames in the two viewers."""
         self.append_log("\nDone.")
         self.start_btn.setEnabled(True)
         self.start_btn.setText("Start Tracking")
@@ -709,6 +757,7 @@ class Application(QMainWindow):
                         f"{so} side-on frame{'s' if so != 1 else ''}.")
 
     def on_tracking_error(self, message: str):
+        """Log the error and re-enable the Start button."""
         self.append_log(f"\nERROR: {message}")
         self.start_btn.setEnabled(True)
         self.start_btn.setText("Start Tracking")
@@ -716,6 +765,8 @@ class Application(QMainWindow):
     # Physics Calculation
 
     def start_physics_calculation(self):
+        """Calculate the top-down speed and log the outcome; not connected to anything.
+        """
         self.append_log("\nStarting physics calculation…")
         try:
             top_down_physics_engine.PhysicsEngine().calculate_velocity(top_down_frames, self.top_down_video.fps)
@@ -724,6 +775,7 @@ class Application(QMainWindow):
             self.append_log(f"ERROR during physics calculation: {e}")
 
     def append_log(self, text: str):
+        """Add text to the log, staying scrolled to the bottom if it already was."""
         scrollbar = self.log_display.verticalScrollBar()
         at_bottom = scrollbar.value() >= scrollbar.maximum() - 4
         self.log_display.append(text)
@@ -731,11 +783,13 @@ class Application(QMainWindow):
             scrollbar.setValue(scrollbar.maximum())
 
     def closeEvent(self, event):
+        """Restore normal printing before the window closes."""
         sys.stdout = sys.__stdout__
         super().closeEvent(event)
 
 
 def main():
+    """Open the main window and run it until it is closed."""
     app = QApplication(sys.argv)
     application = Application()
     application.show()

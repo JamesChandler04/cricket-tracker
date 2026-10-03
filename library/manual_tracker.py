@@ -1,3 +1,9 @@
+"""Click-through OpenCV windows for marking the ball by hand in the top-down and side-on
+videos.
+
+The current program gets its tracked points from these clicks.
+"""
+
 import sys
 
 import cv2
@@ -9,11 +15,17 @@ from library.physics_engines.side_on_physics_engine import TrackedPoint
 
 
 ZOOM_FACTOR = 10
+"""How many times the side-on zoom magnifies the area around the mouse."""
 ZOOM_INTERPOLATION = cv2.INTER_NEAREST
+"""Resize method for side-on zoom; nearest-neighbour lets clicks map back exactly."""
 
 
 class TopDownTracker:
+    """Click-through window for the top-down video: two ball-diameter calibrations, then
+    the ball's centre in each frame and, optionally, the seam.
+    """
     def __init__(self):
+        """Set up an empty tracker for a 72 mm ball; the video is picked in run."""
         self.top_down_video = None
         self.frame_positions = []
         self.seam_points = []
@@ -34,6 +46,7 @@ class TopDownTracker:
         self.calculators = calculators.Calculators()
 
     def _add_or_replace_point_for_frame(self, frame_no, x, y, t):
+            """Store the ball position for a frame, replacing any earlier one."""
             positions = self.frame_positions
             for i, (f, *_rest) in enumerate(positions):
                 if f == frame_no:
@@ -43,6 +56,7 @@ class TopDownTracker:
             positions.sort(key=lambda z: z[0])
 
     def _mouse_callback(self, event, x, y, flags, param):
+        """Handle a left click as a calibration point, ball position or seam point."""
         if event == cv2.EVENT_LBUTTONDOWN:
             if self.calibration_active:
                 if not self.calibrations or len(self.calibrations[-1][1]) == 2:
@@ -72,6 +86,9 @@ class TopDownTracker:
     
 
     def run(self):
+        """Show the top-down video and handle keys and clicks until S moves on; Q or Esc
+        ends the whole program.
+        """
         self.top_down_video = self.display.load_main_video()
 
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
@@ -184,6 +201,9 @@ class TopDownTracker:
                     print(f"Main view rotated to {self.top_down_video.rotation} degrees")
 
     def get_top_down_points(self) -> list[TopDownBallDataPoint]:
+        """Run the tracker and return one data point per clicked frame, with the
+        diameter ends, ball centre and any seam points.
+        """
         self.run()
 
         # Get calibration points for speed calcuations.
@@ -224,7 +244,11 @@ class TopDownTracker:
 
 
 class SideOnTracker:
+    """Click-through window for the side-on video: the ball's centre in each frame, with
+    a zoom for precise clicks.
+    """
     def __init__(self):
+        """Set up an empty tracker with zoom off; the video is picked in run."""
         self.side_on_video = None
         self.side_positions = []
         self.side_calibration = None
@@ -242,6 +266,7 @@ class SideOnTracker:
         self.drawers = drawers.Drawers()
 
     def _add_or_replace_point_for_frame(self, frame_no, x, y, t):
+        """Store the ball position for a frame, replacing any earlier one."""
         positions = self.side_positions
         for i, (f, *_rest) in enumerate(positions):
             if f == frame_no:
@@ -251,6 +276,7 @@ class SideOnTracker:
         positions.sort(key=lambda z: z[0])
 
     def _toggle_side_zoom(self):
+        """Turn the zoom off, or on around the mouse position."""
         if self.side_zoom_active:
             self.side_zoom_active = False
             self.side_zoom_centre = None
@@ -332,6 +358,7 @@ class SideOnTracker:
         return zoomed
 
     def _mouse_callback(self, event, x, y, flags, param):
+        """Track the mouse and record clicks as calibration points or ball positions."""
         # Everything below works in raw frame coordinates, regardless of zoom state.
         x, y = self._side_view_to_frame_coords(x, y)
 
@@ -365,6 +392,7 @@ class SideOnTracker:
                 #print(f"Side View - Frame {self.side_on_video.get_current_frame_number()}: Ball at (x={x}, z={y}) - Time: {timestamp:.3f}s")
 
     def run(self):
+        """Show the side-on video and handle keys and clicks until S, Q or Esc."""
         self.side_on_video = self.display.load_side_video()
 
         cv2.namedWindow(self.window_name_side, cv2.WINDOW_NORMAL)
@@ -472,6 +500,7 @@ class SideOnTracker:
                     print("Side view tracking, calibration, and frame mapping reset.")
 
     def get_side_on_points(self) -> list[TrackedPoint]:
+        """Run the tracker and return the clicked ball centres as TrackedPoints."""
         self.run()
 
         # points_list is a list of (frame, x, y, time)

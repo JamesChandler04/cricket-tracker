@@ -1,3 +1,5 @@
+"""Reads a delivery's saved files back for the GUI's Results and Coordinates tabs."""
+
 from __future__ import annotations
 
 import csv
@@ -16,10 +18,12 @@ from library.physics_engines.side_on_physics_engine import ANALYSIS_YAML_NAME, P
 # pointing the save folder at it.
 
 TOP_DOWN_FILE_NAME = "top_down_analysis.yaml"
+"""Default name of the file the top-down step saves its results in."""
 SEAM_METHODS = ("automatic", "manual")
+"""Seam detector methods whose seam files are shown, in this order."""
 NOT_SAVED = "Not in this folder yet"
+"""Text shown in the Results tab for a file that is not in the folder yet."""
 
-# tracked_points.csv column, heading in the table, decimal places shown
 COORDINATE_COLUMNS = (
     ("frame", "Frame", 0),
     ("time_s", "Time (s)", 4),
@@ -30,6 +34,7 @@ COORDINATE_COLUMNS = (
     ("dy_m", "dY (m)", 4),
     ("dz_m", "dZ (m)", 4),
 )
+"""Coordinates tab columns as (tracked_points.csv column, heading, decimal places)."""
 
 
 @dataclass
@@ -96,6 +101,7 @@ def load_coordinates(folder: str | Path) -> CoordinateTable:
 
 
 def _top_down_section(path: Path) -> ResultSection:
+    """Build the Top-down section from the top-down results file at path."""
     data, problem = _read_yaml(path)
     if problem:
         return ResultSection("Top-down", path, [ResultRow(problem)])
@@ -108,6 +114,7 @@ def _top_down_section(path: Path) -> ResultSection:
 
 
 def _seam_section(path: Path, method: str) -> ResultSection:
+    """Build the section for one method's seam file, with any per-frame angles."""
     title = f"Seam angle ({method})"
     data, problem = _read_yaml(path)
     if problem:
@@ -132,6 +139,7 @@ def _seam_section(path: Path, method: str) -> ResultSection:
 
 
 def _side_on_section(path: Path) -> ResultSection:
+    """Build the Side-on section from the side-on analysis file at path."""
     data, problem = _read_yaml(path)
     if problem:
         return ResultSection("Side-on", path, [ResultRow(problem)])
@@ -184,10 +192,14 @@ def _read_yaml(path: Path) -> tuple[dict[str, Any], str]:
 
 
 def _mapping(value: object) -> dict[str, Any]:
+    """Return value if it is a dict, otherwise an empty dict."""
     return value if isinstance(value, dict) else {}
 
 
 def _number(value: Any, layout: str, missing: str = "-") -> str:
+    """Format a number for display, or return a placeholder when it is missing. Values
+    that are not numbers are shown as they are.
+    """
     if value is None or isinstance(value, bool):
         return missing
     try:
@@ -197,34 +209,40 @@ def _number(value: Any, layout: str, missing: str = "-") -> str:
 
 
 def _join(*parts: str) -> str:
+    """Join the parts that have a value with spaces, or return a dash if none do."""
     return " ".join(part for part in parts if part and part != "-") or "-"
 
 
 def _speed(km_h: object, m_s: object) -> str:
+    """Format the delivery speed in km/h, with m/s in brackets after it when saved."""
     speed = _number(km_h, "{:.2f} km/h")
     in_m_s = _number(m_s, "({:.2f} m/s)")
     return speed if in_m_s == "-" else f"{speed} {in_m_s}"
 
 
 def _fit(fit: dict[str, Any], which: str) -> str:
+    """Describe a line fit by the points it was fitted to and its RMS residual in cm."""
     points = _number(fit.get("source_point_count"), f"{which} {{:.0f}} points")
     residual = _number(fit.get("residual_rms_cm"), "residual {:.2f} cm RMS")
     return ", ".join(part for part in (points, residual) if part != "-") or "-"
 
 
 def _frames(first: object, last: object) -> str:
+    """Return the frame range in brackets, or an empty string if an end is missing."""
     if first is None or last is None:
         return ""
     return f"(frames {first}-{last})"
 
 
 def _vector(values: object, layout: str, unit: str) -> str:
+    """Format a list of numbers with a unit, or return a dash if there are none."""
     if not isinstance(values, (list, tuple)) or not values:
         return "-"
     return ", ".join(_number(value, layout) for value in values) + f" {unit}"
 
 
 def _cell(text: str | None, places: int) -> str:
+    """Format one CSV value to places decimals, keeping text that is not a number."""
     if text is None:
         return ""
     try:

@@ -1,10 +1,16 @@
+"""Asks the user to pick the top-down and side-on videos and their starting frames."""
+
 import cv2
 import tkinter as tk
 from tkinter import filedialog
 from library.helpers import Video
 
 class Display:
+    """Prompts that load the top-down and side-on videos chosen by the user."""
     def load_main_video(self) -> Video:
+        """Ask the user to pick the top-down video in a file dialog and type a starting
+        frame, and return the video at that frame.
+        """
         print("Please select the main cricket video file (bird's eye view).")
 
         root = tk.Tk()
@@ -31,6 +37,9 @@ class Display:
         return video
 
     def load_side_video(self) -> Video:
+        """Ask the user to pick the side-on video in a file dialog and type a starting
+        frame, and return the video at that frame.
+        """
         print("Please select the side view video file (side view).")
 
         root = tk.Tk()

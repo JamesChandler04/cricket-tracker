@@ -1,3 +1,5 @@
+"""Tests for library/display.py."""
+
 import pytest
 from unittest.mock import patch, MagicMock
 import cv2
@@ -5,7 +7,9 @@ from library.display import Display
 
 
 class TestDisplay:
+    """Tests for Display's frame turning, frame stepping and video loading."""
     def test_transform_frame_90(self):
+        """Check that a 90 deg turn uses cv2.rotate 90 deg clockwise."""
         display = Display()
         frame = MagicMock()
         with patch('cv2.rotate') as mock_rotate:
@@ -15,6 +19,7 @@ class TestDisplay:
             assert result == 'rotated_90'
 
     def test_transform_frame_180(self):
+        """Check that a 180 deg turn uses cv2.rotate 180 deg."""
         display = Display()
         frame = MagicMock()
         with patch('cv2.rotate') as mock_rotate:
@@ -24,6 +29,7 @@ class TestDisplay:
             assert result == 'rotated_180'
 
     def test_transform_frame_270(self):
+        """Check that a 270 deg turn uses cv2.rotate 90 deg anticlockwise."""
         display = Display()
         frame = MagicMock()
         with patch('cv2.rotate') as mock_rotate:
@@ -33,32 +39,38 @@ class TestDisplay:
             assert result == 'rotated_270'
 
     def test_transform_frame_default(self):
+        """Check that a 0 deg turn returns the frame unchanged."""
         display = Display()
         frame = 'original_frame'
         result = display.transform_frame(frame, 0)
         assert result == frame
 
     def test_advance_frame_increment(self):
+        """Check that stepping forward moves to the next frame."""
         display = Display()
         result = display.advance_frame(5, 10)
         assert result == 6
 
     def test_advance_frame_at_end(self):
+        """Check that stepping forward on the last frame stays there."""
         display = Display()
         result = display.advance_frame(9, 10)
         assert result == 9
 
     def test_previous_frame_decrement(self):
+        """Check that stepping back moves to the previous frame."""
         display = Display()
         result = display.previous_frame(5)
         assert result == 4
 
     def test_previous_frame_at_zero(self):
+        """Check that stepping back from frame 0 stays there."""
         display = Display()
         result = display.previous_frame(0)
         assert result == 0
 
     def test_load_main_video_success(self):
+        """Check that loading the main video gives its frame count, size and fps."""
         display = Display()
         with patch('builtins.input') as mock_input, \
              patch('cv2.VideoCapture') as mock_cap_class:
@@ -81,6 +93,7 @@ class TestDisplay:
             mock_input.assert_called_once_with("Enter the path to your main cricket video file (bird's eye view): ")
 
     def test_load_main_video_fps_zero_valid_input(self):
+        """Check that a typed fps is used when the main video reports 0 fps."""
         display = Display()
         with patch('builtins.input') as mock_input, \
              patch('cv2.VideoCapture') as mock_cap_class:
@@ -98,6 +111,7 @@ class TestDisplay:
             assert fps == 30.5
 
     def test_load_main_video_fps_zero_invalid_then_valid(self):
+        """Check that the fps is asked for again until a positive number is typed."""
         display = Display()
         with patch('builtins.input') as mock_input, \
              patch('cv2.VideoCapture') as mock_cap_class:
@@ -115,6 +129,7 @@ class TestDisplay:
             assert fps == 25.0
 
     def test_load_main_video_not_opened(self):
+        """Check that a main video that cannot be opened raises ValueError."""
         display = Display()
         with patch('builtins.input') as mock_input, \
              patch('cv2.VideoCapture') as mock_cap_class:
@@ -126,6 +141,7 @@ class TestDisplay:
                 display.load_main_video()
 
     def test_load_side_video_success(self):
+        """Check that loading the side-on video gives its frame count and size."""
         display = Display()
         with patch('builtins.input') as mock_input, \
              patch('cv2.VideoCapture') as mock_cap_class:
@@ -146,6 +162,7 @@ class TestDisplay:
             mock_input.assert_called_once_with("Enter the path to the side view video file: ")
 
     def test_load_side_video_empty_path(self):
+        """Check that an empty side-on video path raises ValueError."""
         display = Display()
         with patch('builtins.input') as mock_input:
             mock_input.return_value = ''
@@ -153,6 +170,7 @@ class TestDisplay:
                 display.load_side_video()
 
     def test_load_side_video_not_opened(self):
+        """Check that a side-on video that cannot be opened raises ValueError."""
         display = Display()
         with patch('builtins.input') as mock_input, \
              patch('cv2.VideoCapture') as mock_cap_class:

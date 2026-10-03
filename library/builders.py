@@ -1,9 +1,15 @@
+"""Builds the 3D Data table (per-frame positions in m, side-on pixels and swing) for the
+old Excel export. Not used by any program.
+"""
+
 import math
 import pandas as pd
 import numpy as np
 
 class Builder:
+    """Mixin that builds the 3D Data table for the Excel export."""
     def _build_3d_data(self, frame_positions, meters_per_pixel, initial_velocity, deceleration):
+        """Return the 3D Data table, extended to 17 m, or None if it cannot be built."""
         FX = 2877.72
         FZ = 2877.72
 

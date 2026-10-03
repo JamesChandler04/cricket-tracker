@@ -1,24 +1,42 @@
+"""Draws the trackers' text and overlays (tracked path, seam and calibration points) on
+video frames.
+"""
+
 import cv2
 from enum import Enum
 
 class Color(Enum):
+    """Named colours as OpenCV BGR tuples."""
     RED = (0, 0, 255)
+    """Red, as an OpenCV BGR colour."""
     GREEN = (0, 255, 0)
+    """Green, as an OpenCV BGR colour."""
     BLUE = (255, 0, 0)
+    """Blue, as an OpenCV BGR colour."""
     YELLOW = (255, 255, 0)
+    """Yellow in RGB order, which OpenCV's BGR order draws as cyan."""
     CYAN = (0, 255, 255)
+    """Cyan in RGB order, which OpenCV's BGR order draws as yellow."""
     MAGENTA = (255, 0, 255)
+    """Magenta, as an OpenCV BGR colour."""
     WHITE = (255, 255, 255)
+    """White, as an OpenCV BGR colour."""
     BLACK = (0, 0, 0)
+    """Black, as an OpenCV BGR colour."""
 
 class Drawers:
+    """Drawing helpers for the tracker windows."""
     def draw_text(self, frame, text, position, font_scale=1.2, thickness=3):
+        """Draw black text with a white drop shadow at a position on the frame."""
         font = cv2.FONT_HERSHEY_SIMPLEX
         x, y = position
         cv2.putText(frame, text, (x + 2, y + 2), font, font_scale, Color.WHITE.value, thickness + 2, cv2.LINE_AA)
         cv2.putText(frame, text, (x, y), font, font_scale, Color.BLACK.value, thickness, cv2.LINE_AA)
 
     def draw_main_trajectory(self, frame, frame_positions, current_frame, frame_width, seam_points, seam_measurements, calibrations):
+        """Draw the top-down overlays: the tracked path, seam points and line, the
+        current frame's seam angle and the calibration points.
+        """
         if len(frame_positions) > 1:
             for i in range(1, len(frame_positions)):
                 prev = frame_positions[i - 1]
@@ -54,6 +72,7 @@ class Drawers:
                 cv2.line(frame, points[0], points[1], (0, 255, 255), 2)
         
     def draw_side_trajectory(self, frame, side_positions, current_frame, side_calibration):
+        """Draw the side-on overlays: the tracked path and the calibration points."""
         if len(side_positions) > 1:
             for i in range(1, len(side_positions)):
                 prev = side_positions[i - 1]

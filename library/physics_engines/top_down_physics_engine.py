@@ -1,3 +1,10 @@
+"""Works out a delivery's speed from the clicked top-down ball centres, scaled by the
+ball's 72 mm diameter, and its seam angle relative to the direction of travel.
+
+Also holds an earlier side-on engine that measured swing against a known swingless
+reference delivery; the current program uses side_on_physics_engine.py instead.
+"""
+
 import math
 import numpy as np
 import matplotlib
@@ -12,9 +19,15 @@ from library.helpers import (Coord, SideOnBallData, SideOnBallDataPoint, TopDown
                              TopDownBallDataPoint)
 
 SAVE_DIRECTORY = str(paths.DELIVERY_DIR)
-BALL_METRE_DIAMETER = 0.072 # Ball diameter in metres
+"""Default folder for one delivery's results, as a string; not used in this module."""
+BALL_METRE_DIAMETER = 0.072
+"""Diameter of a cricket ball, in m; sets the scale for the top-down speed."""
 GRAVITY = 9.81
-FRAMES_FIT_SEAMLESS = 15 # Number of early frames used to fit the swingless trajectory's initial velocity
+"""Gravitational acceleration, in m/s^2, for the swingless model's vertical motion."""
+FRAMES_FIT_SEAMLESS = 15
+"""Number of tracked points from release used to fit the swingless trajectory's initial
+lateral and vertical speeds.
+"""
 
 # Lateral drag coefficient, per metre - fitted from a known-swingless reference
 # delivery. Same physical idea as the forward drag_coefficient, applied to the
@@ -24,6 +37,9 @@ FRAMES_FIT_SEAMLESS = 15 # Number of early frames used to fit the swingless traj
 # see calculate_relative_swing_bestfit for an alternative that doesn't assume
 # this functional form at all.
 LATERAL_DRAG_COEFFICIENT = 24.377
+"""Quadratic drag coefficient for the lateral motion in the swingless model, in 1/m,
+fitted from the swingless reference delivery.
+"""
 
 # ---------------------------------------------------------------------------
 # Known swingless reference delivery - a real, confirmed-straight ball, used
@@ -31,9 +47,13 @@ LATERAL_DRAG_COEFFICIENT = 24.377
 # relative swing on future deliveries.
 # ---------------------------------------------------------------------------
 REFERENCE_FPS = 119.88
+"""Frame rate of the swingless reference delivery's side-on video, in fps."""
 REFERENCE_INITIAL_SPEED_KMH = 107
+"""Speed of the swingless reference delivery, in km/h."""
 REFERENCE_DRAG_COEFFICIENT = 0.0092
+"""Forward drag coefficient for the swingless reference delivery, in 1/m."""
 REFERENCE_CALIBRATION_PATH = str(paths.REFERENCE_CALIBRATION_PATH)
+"""Path of the side-on camera calibration for the swingless reference delivery."""
 
 REFERENCE_SIDE_ON_DATA = [
     (428,1710,721),(429,1741,728),(430,1765,734),(431,1789,740),(432,1810,746),
@@ -45,13 +65,23 @@ REFERENCE_SIDE_ON_DATA = [
     (458,2032,839),(459,2034,841),(460,2039,844),(461,2041,847),(462,2045,850),
     (463,2048,852),(464,2052,855),
 ]
+"""Clicked side-on ball centres of the swingless reference delivery, as (frame, x, y)
+with x and y in px.
+"""
 
 class SelectionType(Enum):
+    """Which summary of the per-frame speeds calculate_velocity returns."""
     MIN = 1
+    """The lowest per-frame speed."""
     MEAN = 2
+    """The mean of the per-frame speeds."""
     MAX = 3
+    """The highest per-frame speed."""
 
 class TopDownPhysicsEngine:
+    """Top-down physics engine that works out the delivery speed and the seam angle
+    relative to the direction of travel, and saves the top-down results.
+    """
     def calculate_velocity(self, top_down_points: list[TopDownBallDataPoint], fps: float, type: SelectionType) -> tuple[float, list[float]]:
         '''
         Turns list of top down points to velocities (km/h).
@@ -135,6 +165,9 @@ class TopDownPhysicsEngine:
 
 
 class SideOnPhysicsEngine:
+    """Earlier side-on physics engine that measures swing relative to a known swingless
+    reference delivery. Not used by the current program.
+    """
 
     def build_cube_ring_distances(
         self,
@@ -177,6 +210,7 @@ class SideOnPhysicsEngine:
         not a linear approximation of it.
         '''
         def sse(vx0):
+            """Return the lateral fit's squared error for a trial initial speed."""
             return sum((self.lateral_distance_at_time(t, vx0, lateral_drag_coefficient) - x) ** 2 for t, x in zip(ts, xs))
         lo, hi = -50.0, 50.0
         gr = (math.sqrt(5) - 1) / 2
@@ -552,6 +586,7 @@ class SideOnPhysicsEngine:
 
     @staticmethod
     def _build_reference_points() -> list[SideOnBallDataPoint]:
+        """Return the reference delivery's clicked centres as side-on data points."""
         return [
             SideOnBallDataPoint(
                 frame_number=fn,
@@ -566,6 +601,6 @@ class SideOnPhysicsEngine:
 
     @staticmethod
     def _load_reference_calibration() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Load the reference delivery's calibration as (K_inv, R_T, t_std)."""
         data = np.load(REFERENCE_CALIBRATION_PATH)
         return data["K_inv"], data["R_T"], data["t_std"]
-

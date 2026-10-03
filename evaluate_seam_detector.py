@@ -1,3 +1,9 @@
+"""Tests how accurately the automatic seam angle detector finds known seam angles.
+
+The detector is run on labelled ball images turned to set seam angles and on drawn,
+motion-blurred balls.
+"""
+
 import argparse
 import csv
 import math
@@ -16,14 +22,20 @@ from library.automated.automatic_seam_angle import AutomaticSeamAngleDetector
 from library.detect_seam_angle_file import BallImage, fold_line_angle
 
 DEFAULT_OUTPUT_DIR = paths.OUTPUT_DIR / "seam_detector_test"
+"""Folder the results are saved to by default."""
 TOLERANCE_DEG = 2.5
+"""Default largest error counted as a correct seam angle, in degrees."""
 CLICK_ERROR_PX = 2.0
-BLUR_RANGE = (0.10, 0.30)  # motion blur length of the drawn balls, as a fraction of the ball's width
+"""Default largest error added to each coordinate of the given ball centre, in px."""
+BLUR_RANGE = (0.10, 0.30)
+"""Default shortest and longest motion blur of the drawn balls, in ball diameters."""
 
-# Chart colours (light theme)
+# Chart colours
 SURFACE, INK, INK_2, MUTED, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
 SERIES = "#2a78d6"
+"""Colour of the error dots on the chart."""
 BAND = "#f0efec"
+"""Colour of the shaded tolerance band on the chart."""
 
 
 @dataclass
@@ -33,12 +45,14 @@ class TestImage(BallImage):
     pixels: np.ndarray | None = None
 
     def load(self) -> np.ndarray:
+        """Return the pixels held in memory."""
         assert self.pixels is not None
         return self.pixels
 
 
 @dataclass
 class Result:
+    """Outcome of one test: the true and found seam angles and the image tested."""
     test_set: str
     index: int
     true_deg: float
@@ -50,6 +64,9 @@ class Result:
 
     @property
     def error(self) -> float | None:
+        """Return the found minus the true seam angle, folded into (-90, 90] deg, or
+        None if no seam was found.
+        """
         return None if self.found_deg is None else fold_line_angle(self.found_deg - self.true_deg)
 
 
@@ -168,10 +185,14 @@ def _line_kernel(length: float, angle_deg: float) -> np.ndarray:
 
 
 def _contrast(seam: object) -> float:
+    """Return the contrast of a found seam, or 0 if no seam was found."""
     return float(getattr(seam, "contrast", 0.0)) if seam is not None else 0.0
 
 
 def summarise(results: list[Result], angle_range: tuple[float, float], tolerance: float) -> list[str]:
+    """Return printable lines on one test set's accuracy, overall and for each 10 deg
+    band of true seam angle.
+    """
     errors = np.array([r.error for r in results if r.error is not None])
     within = sum(1 for r in results if r.error is not None and abs(r.error) <= tolerance)
     missed = sum(1 for r in results if r.error is None)
@@ -192,6 +213,9 @@ def summarise(results: list[Result], angle_range: tuple[float, float], tolerance
 
 
 def plot_errors(sets: list[list[Result]], angle_range: tuple[float, float], tolerance: float, path: Path) -> None:
+    """Save side-by-side charts of each test set's errors against the true seam angle,
+    with the tolerance band shaded.
+    """
     plt.switch_backend("Agg")  # draw to a file, no window
     fig, axes = plt.subplots(1, len(sets), figsize=(6.2 * len(sets), 4.2), sharey=True, facecolor=SURFACE)
     axes = np.atleast_1d(axes)
@@ -253,6 +277,7 @@ def draw_worst(sets: list[list[Result]], path: Path, per_set: int = 6) -> None:
 
 def _dashed(image: np.ndarray, centre: tuple[float, float], angle: float, reach: float,
             colour: tuple[int, int, int]) -> None:
+    """Draw a dashed line through centre at angle (in radians), reach px either side."""
     for start in np.arange(-reach, reach, 9.0):
         end = min(start + 5.0, reach)
         p = (round(centre[0] + start * math.cos(angle)), round(centre[1] + start * math.sin(angle)))
@@ -261,6 +286,9 @@ def _dashed(image: np.ndarray, centre: tuple[float, float], angle: float, reach:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Run both test sets, save results.csv, errors.png and worst_cases.png, and print a
+    summary of each.
+    """
     parser = argparse.ArgumentParser(description="Test the automatic seam angle detector.")
     parser.add_argument("count", nargs="?", type=int, default=500, help="test images in each set (default 500)")
     parser.add_argument("--range", nargs=2, type=float, default=(-30.0, 30.0), metavar=("MIN", "MAX"),

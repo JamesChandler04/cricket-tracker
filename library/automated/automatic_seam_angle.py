@@ -1,3 +1,8 @@
+"""Automatic seam angle detector that finds the seam on every ball image by lining up
+its stitching stripes. The seam angles found are averaged, with a warning when they
+spread more than MAX_SPREAD_DEG.
+"""
+
 from __future__ import annotations
 
 import math
@@ -37,19 +42,34 @@ from library.detect_seam_angle_file import (BALL_IMAGE_FOLDER, DEFAULT_SAVE_DIR,
 # the average of the angles found, with a warning when they differ by more than
 # MAX_SPREAD_DEG.
 
-SEARCH_RANGE_DEG = 45.0       # angles searched, either side of the direction of travel
-COARSE_STEP_DEG = 1.0         # first pass over the whole range
-FINE_STEP_DEG = 0.05          # second pass around the best coarse angle
-COLUMN_FRACTION = 0.6         # columns used: within this fraction of the radius of the centre
-EDGE_MARGIN = 0.08            # rows within this fraction of the radius of the ball's edge are not used
-SHADING_SCALE = 0.075         # search: shading smoother than this fraction of the radius is ignored
-REFINE_RANGE_DEG = 5.0        # refine: angles tried either side of the level seam
+SEARCH_RANGE_DEG = 45.0
+"""Range of angles searched either side of the direction of travel, in degrees."""
+COARSE_STEP_DEG = 1.0
+"""Step between the angles tried in the first pass over the whole range, in degrees."""
+FINE_STEP_DEG = 0.05
+"""Step of the second pass, around the best angle of the first, in degrees. Refining
+also stops once a pass moves the angle less than this.
+"""
+COLUMN_FRACTION = 0.6
+"""Columns used, as a fraction of the radius either side of the ball's centre."""
+EDGE_MARGIN = 0.08
+"""Width of the ring left out inside the ball's edge, as a fraction of the radius."""
+SHADING_SCALE = 0.075
+"""Scale above which shading is ignored in the search, as a fraction of the radius."""
+REFINE_RANGE_DEG = 5.0
+"""Range of angles tried either side of the levelled seam when refining, in degrees."""
 REFINE_PASSES = 2
-REFINE_SHADING_SCALE = 0.2    # refine: shading smoother than this fraction of the radius is ignored
-REFINE_SMOOTHING_SCALE = 0.04  # refine: detail finer than this fraction of the radius is smoothed out
-MIN_CONTRAST = 3.0            # sharpest sum over the typical one; below this no seam was found
-MAX_SPREAD_DEG = 5.0          # warn when the seam angles found on the frames differ by more than this
-SEAM_LINE_LENGTH = 1.6        # length of the returned seam line, in ball radii
+"""Largest number of refine passes after the search."""
+REFINE_SHADING_SCALE = 0.2
+"""Scale above which shading is ignored when refining, as a fraction of the radius."""
+REFINE_SMOOTHING_SCALE = 0.04
+"""Scale below which detail is smoothed when refining, as a fraction of the radius."""
+MIN_CONTRAST = 3.0
+"""Lowest contrast (sharpest sum over the typical one) for a seam to count as found."""
+MAX_SPREAD_DEG = 5.0
+"""Largest spread of the per-frame seam angles before a warning is given, in degrees."""
+SEAM_LINE_LENGTH = 1.6
+"""Length of the seam line returned for each ball image, in ball radii."""
 
 
 @dataclass
@@ -86,6 +106,7 @@ class AveragedSeamMeasurement(SeamMeasurement):
                 f"be reliable. Check the ball images, or pick the seam by hand.")
 
     def details(self) -> dict[str, object]:
+        """Return each frame's angle, the spread and any warning, for the seam file."""
         details: dict[str, object] = {
             "frames_averaged": len(self.frame_angles_deg),
             "seam_angle_spread_deg": round(self.spread_deg, 3),
@@ -109,6 +130,7 @@ class AutomaticSeamAngleDetector(SeamAngleDetector):
     """Finds the seam on the cropped ball images without any clicking."""
 
     method = "automatic"
+    """Method name for seams found automatically."""
 
     def detect(self, ball_images: list[BallImage]) -> SeamMeasurement | None:
         """
@@ -378,10 +400,12 @@ def _band_offset(image: np.ndarray, used: np.ndarray, across: np.ndarray, top: n
 
 
 def _contrast(seam: SeamMeasurement) -> float:
+    """Return how clearly a seam's stitching lined up, or 1 for other kinds of seam."""
     return seam.contrast if isinstance(seam, AutomaticSeamMeasurement) else 1.0
 
 
 def _angle(seam: SeamMeasurement) -> float:
+    """Return the seam angle, or the seam line's image angle when travel is unknown."""
     return seam.raw_angle_deg if seam.seam_angle_deg is None else seam.seam_angle_deg
 
 

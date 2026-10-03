@@ -1,3 +1,5 @@
+"""Utility script that steps through a video and saves chosen frames as PNG images."""
+
 import sys
 from pathlib import Path
 from tkinter import Tk, filedialog
@@ -13,7 +15,9 @@ from library.drawers import Drawers
 from library.helpers import Key, Video
 
 FRAMES_DIR = paths.OUTPUT_DIR / "frames"
+"""Folder the saved frames go in, in a subfolder named after the video."""
 WINDOW_NAME = "Frame Saver"
+"""Title of the frame saver window."""
 
 
 def choose_video() -> str:
@@ -30,6 +34,7 @@ def choose_video() -> str:
 
 
 def ask_start_frame(total_frames: int) -> int:
+    """Ask for the starting frame, kept within the video; 0 if blank or not a number."""
     answer = input("Enter the starting frame number (default 0): ").strip()
     if not answer:
         return 0
@@ -41,6 +46,7 @@ def ask_start_frame(total_frames: int) -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Run the frame saver on the video path given, or one picked in a file dialog."""
     arguments = sys.argv[1:] if argv is None else argv
     video_path = arguments[0] if arguments else choose_video()
     if not video_path:

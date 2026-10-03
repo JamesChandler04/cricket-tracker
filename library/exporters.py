@@ -1,3 +1,5 @@
+"""Saves the old tracker's results to an Excel workbook. Not used by any program."""
+
 import os
 import math
 import pandas as pd
@@ -6,11 +8,16 @@ from datetime import datetime
 from library import calculators, checkers
 
 class Exporter:
+    """Mixin that saves the tracking results to an Excel workbook."""
     def __init__(self):
+        """Set up the calculators and checkers the export uses."""
         self.calculators = calculators.Calculators()
         self.checkers = checkers.Checker()
     
     def excel(self):
+        """Ask in the console for a folder and file name, then save the tracking data,
+        parameters, seam angles and calibrations as an Excel workbook.
+        """
         if not self.frame_positions:
             print("No tracking data to save.")
             return

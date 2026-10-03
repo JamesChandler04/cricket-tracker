@@ -1,3 +1,9 @@
+"""Old file: the original tracker program, where the ball, seam and ball diameter are
+clicked in OpenCV windows and the results saved to Excel.
+
+Kept for reference only; the current program is main/GUI_new_cricket_ball_tracker.py.
+"""
+
 import cv2
 import numpy as np
 import pandas as pd
@@ -22,10 +28,18 @@ if not typing.TYPE_CHECKING:
     import xlsxwriter # Used when saving to excel
 
 ZOOM_FACTOR = 10
+"""Magnification of the side-on view's zoom, toggled with Z around the mouse."""
 ZOOM_INTERPOLATION = cv2.INTER_NEAREST
+"""OpenCV interpolation for enlarging the zoomed crop; nearest-neighbour, which the
+click-to-pixel mapping relies on.
+"""
 
 class CricketBallTracker:
+    """Hand tracker for clicking the ball in a top-down then a side-on video and saving
+    the measurements to Excel.
+    """
     def __init__(self):
+        """Set up empty tracking state, the helpers and the settings from config.yml."""
         self.frame_positions = []  # (frame_number, x_px, y_px, time_s) for main view
         self.side_positions = []   # (frame_number, x_px, z_px, time_s) for side view
         self.meters_per_pixel = None
@@ -129,6 +143,7 @@ class CricketBallTracker:
         return positions, calibration
 
     def _toggle_side_zoom(self):
+        """Turn the side-on zoom off, or on around the mouse position."""
         if self.side_zoom_active:
             self.side_zoom_active = False
             self.side_zoom_centre = None
@@ -146,6 +161,9 @@ class CricketBallTracker:
 
     # ---------------------- Mouse ---------------------- #
     def top_down_mouse_callback(self, event, x, y, flags, param):
+        """Handle a left click in the top-down window as a ball-diameter calibration
+        point, ball position or seam point, depending on the active mode.
+        """
         if event == cv2.EVENT_LBUTTONDOWN:
             if self.calibration_active:
                 if not self.calibrations or len(self.calibrations[-1][1]) == 2:
@@ -175,6 +193,9 @@ class CricketBallTracker:
                     print(f"Seam angle tracking stopped for frame {self.top_down_video.get_current_frame_number()}. Angle: {self.seam_measurements[-1][1]:.2f} degrees")
 
     def side_on_mouse_callback(self, event, x, y, flags, param):
+        """Record the mouse position in the side-on window and handle a left click as a
+        ball-diameter calibration point or ball position, in raw frame pixels.
+        """
         # Everything below works in raw frame coordinates, regardless of zoom state.
         x, y = self._side_view_to_frame_coords(x, y)
 
@@ -209,6 +230,7 @@ class CricketBallTracker:
 
     # ---------------------- Data Helpers ---------------------- #
     def _add_or_replace_point_for_frame(self, frame_no, x, y, t, is_side=False):
+        """Set a frame's ball position in the top-down or side-on list."""
         positions = self.side_positions if is_side else self.frame_positions
         for i, (f, *_rest) in enumerate(positions):
             if f == frame_no:
@@ -218,6 +240,7 @@ class CricketBallTracker:
         positions.sort(key=lambda z: z[0])
 
     def reset(self):
+        """Clear all tracked points, seam angles, calibrations and calculated values."""
         self.frame_positions = []
         self.side_positions = []
         self.seam_points = []
@@ -234,6 +257,9 @@ class CricketBallTracker:
 
     # ---------------------- 3D Data ---------------------- #
     def _build_3d_data(self):
+        """Return the 3D Data sheet (path extrapolated to 17 m, side-on positions,
+        swing), or None if not ready.
+        """
         FX = 2877.72
         FZ = 2877.72
         X0 = 1920.0
@@ -490,6 +516,9 @@ class CricketBallTracker:
 
     # ---------------------- DataFrame ---------------------- #
     def _build_dataframe(self):
+        """Return the top-down Data sheet (positions in m, speeds) and the speed between
+        the first two points in km/h, or (None, None) if not ready.
+        """
         if not self.frame_positions or self.meters_per_pixel is None:
             return None, None
 
@@ -567,6 +596,9 @@ class CricketBallTracker:
 
     # ---------------------- Save to Excel ---------------------- #
     def save_to_excel(self):
+        """Save the tracking, seam and calibration results to an Excel workbook, asking
+        for its name (and folder, unless config.yml sets one).
+        """
         if not self.frame_positions:
             print("No tracking data to save.")
             return
@@ -714,6 +746,10 @@ class CricketBallTracker:
 
     # ---------------------- Main Tracker ---------------------- #
     def run_main_tracker(self):
+        """Ask for the top-down video and run its window for calibrating and clicking
+        the ball and seam. Return True to go on to the side-on view, or False if the
+        user quits.
+        """
         self.top_down_video = self.display.load_main_video()
 
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
@@ -845,6 +881,9 @@ class CricketBallTracker:
 
     # ---------------------- Side Tracker ---------------------- #
     def run_side_tracker(self):
+        """Ask for the side-on video and run its window for clicking the ball and
+        calibrating its diameter, saving to Excel on S, until the user quits.
+        """
         self.side_on_video = self.display.load_side_video()
 
         cv2.namedWindow(self.window_name_side, cv2.WINDOW_NORMAL)
@@ -953,10 +992,12 @@ class CricketBallTracker:
 
     # ---------------------- Main Entry ---------------------- #
     def run_tracker(self):
+        """Run the top-down window, then the side-on window unless the user quit."""
         if self.run_main_tracker():
             self.run_side_tracker()
 
 def display_excel(excel_file_path):
+    """Show each sheet of an Excel file as a table in a tab of a Tkinter window."""
     try:
         # Read all sheets from Excel file
         excel_file = pd.ExcelFile(excel_file_path)
@@ -1047,6 +1088,7 @@ def display_excel(excel_file_path):
         print(f"Error displaying Excel file: {e}")
 
 def main():
+    """Run the hand tracker on a top-down and then a side-on video."""
     tracker = CricketBallTracker()
 
     tracker.run_tracker()

@@ -1,3 +1,5 @@
+"""Tests for library/drawers.py."""
+
 import pytest
 from unittest.mock import patch, MagicMock
 import cv2
@@ -5,10 +7,13 @@ from library.drawers import Drawers
 
 @pytest.fixture
 def drawers():
+    """Return a new Drawers for each test."""
     return Drawers()
 
 class TestDrawText:
+    """Tests for Drawers.draw_text."""
     def test_draw_text_default_parameters(self, drawers):
+        """Check that default text is black on a thicker white copy offset by 2 px."""
         frame = MagicMock()
         with patch('cv2.putText') as mock_puttext:
             drawers.draw_text(frame, "test text", (10, 20))
@@ -32,6 +37,7 @@ class TestDrawText:
             assert args[6] == 3  # thickness
 
     def test_draw_text_custom_parameters(self, drawers):
+        """Check that the given font scale and thickness are passed to cv2.putText."""
         frame = MagicMock()
         with patch('cv2.putText') as mock_puttext:
             drawers.draw_text(frame, "custom", (5, 15), font_scale=2.0, thickness=2)
@@ -47,7 +53,9 @@ class TestDrawText:
             assert args[6] == 2  # thickness
 
 class TestDrawMainTrajectory:
+    """Tests for Drawers.draw_main_trajectory."""
     def test_draw_main_trajectory_no_positions(self, drawers):
+        """Check that empty positions, seam points and calibrations draw nothing."""
         frame = MagicMock()
         with patch('cv2.line') as mock_line, \
              patch('cv2.circle') as mock_circle, \
@@ -59,6 +67,7 @@ class TestDrawMainTrajectory:
             mock_puttext.assert_not_called()
 
     def test_draw_main_trajectory_single_position(self, drawers):
+        """Check that the current frame's position is a filled red dot with a label."""
         frame = MagicMock()
         frame_positions = [(5, 100, 200, 1.0)]
         with patch('cv2.line') as mock_line, \
@@ -79,6 +88,7 @@ class TestDrawMainTrajectory:
             assert args[4] == -1  # filled
 
     def test_draw_main_trajectory_multiple_positions(self, drawers):
+        """Check that positions are joined by green lines, each with a labelled dot."""
         frame = MagicMock()
         frame_positions = [
             (1, 100, 200, 0.0),
@@ -102,6 +112,7 @@ class TestDrawMainTrajectory:
             assert args[4] == 2  # thickness
 
     def test_draw_main_trajectory_seam_points_single(self, drawers):
+        """Check that one seam point is drawn as a labelled dot with no seam line."""
         frame = MagicMock()
         frame_positions = [(1, 100, 200, 0.0)]
         seam_points = [(150, 250)]
@@ -115,6 +126,7 @@ class TestDrawMainTrajectory:
             mock_line.assert_not_called()
 
     def test_draw_main_trajectory_seam_points_two(self, drawers):
+        """Check that two seam points are drawn as labelled dots joined by a line."""
         frame = MagicMock()
         frame_positions = [(1, 100, 200, 0.0)]
         seam_points = [(150, 250), (160, 260)]
@@ -134,6 +146,7 @@ class TestDrawMainTrajectory:
             assert args[3] == (255, 255, 0)  # yellow
 
     def test_draw_main_trajectory_current_seam_angle(self, drawers):
+        """Check that the current frame's seam angle is written at the top centre."""
         frame = MagicMock()
         frame_positions = [(5, 100, 200, 0.0)]
         seam_points = [(150, 250)]  # Only 1 point, so should show angle
@@ -150,6 +163,7 @@ class TestDrawMainTrajectory:
             assert args[2] == (960, 30)  # frame_width // 2 = 1920 // 2 = 960
 
     def test_draw_main_trajectory_calibrations(self, drawers):
+        """Check that calibration points are drawn, with a line only for a full pair."""
         frame = MagicMock()
         frame_positions = [(1, 100, 200, 0.0)]
         calibrations = [
@@ -172,7 +186,9 @@ class TestDrawMainTrajectory:
             assert args[3] == (0, 255, 255)  # cyan
 
 class TestDrawSideTrajectory:
+    """Tests for Drawers.draw_side_trajectory."""
     def test_draw_side_trajectory_no_positions(self, drawers):
+        """Check that nothing is drawn with no positions and no calibration."""
         frame = MagicMock()
         with patch('cv2.line') as mock_line, \
              patch('cv2.circle') as mock_circle, \
@@ -183,6 +199,7 @@ class TestDrawSideTrajectory:
             mock_puttext.assert_not_called()
 
     def test_draw_side_trajectory_single_position(self, drawers):
+        """Check that one position is a labelled dot of 2 px radius, with no line."""
         frame = MagicMock()
         side_positions = [(5, 100, 200, 1.0)]
         with patch('cv2.line') as mock_line, \
@@ -198,6 +215,7 @@ class TestDrawSideTrajectory:
             assert args[2] == 2  # smaller radius
 
     def test_draw_side_trajectory_multiple_positions(self, drawers):
+        """Check that positions are joined by lines, each with a labelled dot."""
         frame = MagicMock()
         side_positions = [
             (1, 100, 200, 0.0),
@@ -213,6 +231,7 @@ class TestDrawSideTrajectory:
             assert mock_puttext.call_count == 3
 
     def test_draw_side_trajectory_with_calibration(self, drawers):
+        """Check that a two-point calibration is drawn as labelled dots and a line."""
         frame = MagicMock()
         side_positions = [(1, 100, 200, 0.0)]
         side_calibration = (1, [(50, 150), (60, 160)])
@@ -226,6 +245,7 @@ class TestDrawSideTrajectory:
             assert mock_line.call_count == 1
 
     def test_draw_side_trajectory_calibration_partial(self, drawers):
+        """Check that a one-point calibration is drawn as a labelled dot, no line."""
         frame = MagicMock()
         side_positions = [(1, 100, 200, 0.0)]
         side_calibration = (1, [(50, 150)])  # Only 1 point
@@ -239,6 +259,7 @@ class TestDrawSideTrajectory:
             mock_line.assert_not_called()
 
     def test_draw_side_trajectory_no_calibration(self, drawers):
+        """Check that only the position is drawn when there is no calibration."""
         frame = MagicMock()
         side_positions = [(1, 100, 200, 0.0)]
         with patch('cv2.line') as mock_line, \

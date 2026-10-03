@@ -1,3 +1,9 @@
+"""Makes training images for the seam angle network from labelled ball images.
+
+Each is a ball turned, moved and re-shaded on a 200 x 200 px image, black outside the
+ball, and labels.csv records the angle of its seam line and how it was made.
+"""
+
 import argparse
 import csv
 from dataclasses import dataclass
@@ -11,23 +17,37 @@ from library import paths
 from library.detect_seam_angle_file import CROP_SCALE, BallImage, fold_line_angle, load_ball_images
 
 IMAGE_SIZE = 200
-BALL_DIAMETER = IMAGE_SIZE / CROP_SCALE  # same framing as the ball images
-MAX_SHIFT = 10.0                         # most the ball centre moves each way, in pixels
+"""Width and height of each training image, in px."""
+BALL_DIAMETER = IMAGE_SIZE / CROP_SCALE
+"""Ball diameter in each training image, in px, matching the ball images' framing."""
+MAX_SHIFT = 10.0
+"""Default largest shift of the ball centre from the image's middle, each way, in px."""
 
 LABEL_FILE_NAME = "seam_labels.yaml"
+"""File in a ball image folder giving each image's seam line angle, in degrees."""
 DEFAULT_FOLDERS = [paths.OUTPUT_DIR / "frames" / "1t" / "ball_images"]
+"""Ball image folders the labelled balls are read from by default."""
 DEFAULT_OUTPUT_DIR = paths.OUTPUT_DIR / "seam_training"
+"""Folder the training images are written to by default."""
 IMAGE_PREFIX = "seam_"
+"""Start of each training image's file name."""
 LABELS_FILE_NAME = "labels.csv"
+"""CSV file listing each training image's seam line angle and how it was made."""
 
 # Shade changes, picked at random for each image. Hue shifts are in degrees
 # either way; the others multiply the saturation and brightness.
 LEATHER_HUE_SHIFT = 6.0
+"""Largest random shift of the leather's hue, either way, in degrees."""
 LEATHER_SATURATION = (0.85, 1.15)
+"""Range of the random factor the leather's saturation is multiplied by."""
 LEATHER_BRIGHTNESS = (0.85, 1.15)
+"""Range of the random factor the leather's brightness is multiplied by."""
 SEAM_HUE_SHIFT = 10.0
+"""Largest random shift of the stitching's hue, either way, in degrees."""
 SEAM_SATURATION = (0.7, 1.3)
+"""Range of the random factor the stitching's saturation is multiplied by."""
 SEAM_BRIGHTNESS = (0.85, 1.15)
+"""Range of the random factor the stitching's brightness is multiplied by."""
 
 _ROWS, _COLUMNS = np.mgrid[0:IMAGE_SIZE, 0:IMAGE_SIZE]
 
@@ -135,6 +155,7 @@ def shade(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
 
 
 def _change_colour(bgr: np.ndarray, hue_shift: float, saturation: float, brightness: float) -> np.ndarray:
+    """Return the image with hue shifted (deg) and saturation and brightness scaled."""
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)  # from floats: hue 0-360, saturation and value 0-1
     hsv[..., 0] = (hsv[..., 0] + hue_shift) % 360
     hsv[..., 1] = np.clip(hsv[..., 1] * saturation, 0, 1)
@@ -143,6 +164,7 @@ def _change_colour(bgr: np.ndarray, hue_shift: float, saturation: float, brightn
 
 
 def _smoothstep(low: float, high: float, values: np.ndarray) -> np.ndarray:
+    """Return each value mapped smoothly from 0 at low to 1 at high, clamped outside."""
     t = np.clip((values - low) / (high - low), 0, 1)
     return t * t * (3 - 2 * t)
 
@@ -155,6 +177,7 @@ def clear_earlier_run(folder: Path) -> None:
 
 
 def write_image(path: Path, image: np.ndarray) -> None:
+    """Save an image to path as a PNG."""
     # imencode and write_bytes instead of cv2.imwrite, which fails on Windows
     # when the folder name has characters outside the system code page.
     ok, encoded = cv2.imencode(".png", image)
@@ -164,6 +187,7 @@ def write_image(path: Path, image: np.ndarray) -> None:
 
 
 def ask_count() -> int:
+    """Ask the user how many images to make until they give a whole number above 0."""
     while True:
         answer = input("How many images should be made? ").strip()
         try:
@@ -177,6 +201,7 @@ def ask_count() -> int:
 
 
 def _project_path(path: Path) -> str:
+    """Return path relative to the project folder, or as given if it is outside it."""
     try:
         return path.resolve().relative_to(paths.ROOT).as_posix()
     except ValueError:
@@ -184,6 +209,7 @@ def _project_path(path: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Make the training images and labels.csv, replacing any from an earlier run."""
     parser = argparse.ArgumentParser(description="Make training images for the seam angle network.")
     parser.add_argument("count", nargs="?", type=int, help="how many images to make")
     parser.add_argument("--folders", nargs="+", type=Path, default=DEFAULT_FOLDERS,

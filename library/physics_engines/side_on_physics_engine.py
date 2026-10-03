@@ -1,113 +1,8 @@
-"""
-Side-on swing analysis for cricket deliveries.
+"""Reconstructs a delivery's 3D path from the clicked side-on ball centres, the camera
+calibration and the delivery speed, and measures, saves and plots its swing.
 
-Reconstructs a 3D ball trajectory from a clicked side-on pixel track and
-measures lateral swing as the gap between two straight lines: a swingless
-baseline fitted to the first points of the delivery, and a projection fitted to
-the last points. Negative lateral values are to the bowler's left.
-
-The engine is bound to one camera and one frame rate. Delivery speed is passed
-in per call, since it changes from delivery to delivery.
-
-Requires numpy and PyYAML. matplotlib is imported only by the two plot methods.
-
-Coordinate frames
------------------
-The engine reconstructs in the frame the calibration was solved in: origin at
-the centre of the nearest calibration ring, X to the bowler's right, Y forward
-down the pitch, Z positive DOWNWARD. Trajectory, the fits, the swing values and
-both plots all use that frame.
-
-Files written by save_data_to_files use the frame that is easier to measure
-against with a tape: origin at the BOTTOM-LEFT CORNER of the nearest ring, X to
-the bowler's right, Y away from the bowler, Z positive up. The conversion is
-to_output_frame(): X and Y translated, Z translated and flipped. It is applied
-only on the way out to disk, so nothing upstream changes.
-
-Public API
-----------
-Calibration.load(path)
-    Load the side-on camera calibration written by the calibration step.
-
-TrackedPoint(frame, u, v)
-    One clicked ball centre. Build a list of these for the delivery.
-
-SideOnPhysicsEngine(calibration, fps, ...)
-SideOnPhysicsEngine.from_calibration_file(path, fps, ...)
-    An engine bound to one camera and one frame rate.
-
-engine.reconstruct_trajectory(points, speed_km_h) -> Trajectory
-    Pixel track -> 3D world track.
-
-engine.ball_coordinates(trajectory, origin="cubes" | "release") -> (N, 3) array
-    Ball position in metres as X, Y, Z, in the reconstruction frame.
-
-engine.to_output_frame(xyz) -> same shape
-    Reconstruction frame -> reported frame (nearest ring's bottom-left corner).
-
-engine.swing_at_last_tracked_point(trajectory) -> float
-    Measured swing in cm at the last tracked point. This is the number to
-    report: it sits inside the tracked data.
-
-engine.swing_at_17m(trajectory) -> float
-    Projected swing in cm at TARGET_DISTANCE_M. A lower bound.
-
-engine.analyse(points, speed_km_h) -> SwingResult
-    Everything at once: the trajectory, both swing values and the fit
-    diagnostics. SwingResult.summary() renders it as text.
-
-engine.save_data_to_files(result, save_directory, points=None) -> dict
-    Write the whole analysis to disk in the reported frame:
-    tracked_points.csv holds the per-point coordinates, side_on_analysis.yaml
-    holds everything else.
-
-engine.plot_swing(result, save_path=..., show=...)
-    2D lateral-position plot with both swing gaps annotated.
-
-engine.plot_trajectory_3d(result, show=..., save_path=...)
-    Interactive 3D trajectory with the calibration cubes drawn as reference.
-
-Typical use
------------
-    from library.physics_engines.side_on_physics_engine import SideOnPhysicsEngine, TrackedPoint
-
-    engine = SideOnPhysicsEngine.from_calibration_file(
-        "camera_calibration.npz", fps=239.76)
-
-    points = [TrackedPoint(f, u, v) for f, u, v in rows]
-    result = engine.analyse(points, speed_km_h=120.0)
-    print(result.summary())
-
-    engine.save_data_to_files(result, "output/delivery_724", points=points)
-    engine.plot_swing(result, save_path="swing.png")
-    engine.plot_trajectory_3d(result, show=True)
-
-Configuration
--------------
-BASELINE_SOURCE_POINT_COUNT
-    Points from release used to fit the swingless baseline. Too few and the fit
-    is noise-dominated; too many and the baseline bends to follow real swing and
-    biases every result low. Keep it under about a third of the track length.
-
-EXTRAPOLATION_SOURCE_POINT_COUNT
-    Trailing points used to fit the projection line. Fix this once and keep it
-    constant across deliveries, or comparisons between them are meaningless.
-
-TARGET_DISTANCE_M
-    Forward distance at which the projected swing is reported. Well past the
-    tracked range, so it is a lower bound rather than a measurement.
-
-DRAG_COEFFICIENT
-    Quadratic drag on forward motion. Sets how tracked time maps to forward
-    distance.
-
-RING_FORWARD_DISTANCES_M, CUBE_SIDE_M, CUBE_CENTRE_X_M, CUBE_CENTRE_Z_M
-    Calibration cube geometry for the 3D plot. Rings are squares of side
-    CUBE_SIDE_M at those forward distances, centred laterally on CUBE_CENTRE_X_M
-    and vertically on CUBE_CENTRE_Z_M. Defaults assume the calibration origin is
-    the centre of the first ring. Adjust to match how the cubes were actually
-    clicked. These also set the reported frame's origin, so if the cube extent
-    is not 1.5 m each way the offsets change with it.
+Swing is the lateral gap between a swingless baseline fitted to the first points and a
+projection fitted to the last points, at the last tracked point and projected to 17 m.
 """
 
 from __future__ import annotations
@@ -124,20 +19,55 @@ from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import yaml
 
+# Coordinate frames
+# - Reconstruction frame, the one the calibration was solved in: origin at the centre
+#   of the nearest calibration ring, X to the bowler's right, Y forward down the
+#   pitch, Z positive DOWN. The trajectory, line fits, swing values and both plots
+#   use it.
+# - Reported frame, used in the files save_data_to_files writes because it is easier
+#   to measure against with a tape: origin at the bottom-left corner of the nearest
+#   ring, X and Y point the same way, Z positive UP. to_output_frame() converts to it,
+#   only on the way out to disk: X and Y are translated, Z is translated and flipped.
+
 
 BASELINE_SOURCE_POINT_COUNT = 10
+"""Number of points from release used to fit the swingless baseline. More than about a
+third of the track lets it follow the real swing and biases results low.
+"""
 EXTRAPOLATION_SOURCE_POINT_COUNT = 10
+"""Number of points at the end of the track used to fit the projection line. Keep it the
+same for every delivery, or their swing values cannot be compared.
+"""
 TARGET_DISTANCE_M = 17.0
+"""Forward distance at which the projected swing is reported, in m. Well past the
+tracked range, so the swing there is a lower bound, not a measurement.
+"""
 DRAG_COEFFICIENT = 0.0092
+"""Quadratic drag coefficient for the forward motion, in 1/m. Sets how tracked time maps
+to forward distance.
+"""
 GRAVITY = 9.81
+"""Gravitational acceleration, in m/s^2. Not used in this module."""
 
 RING_FORWARD_DISTANCES_M = (0.0, 3.0, 6.0, 9.0)
+"""Forward distances of the calibration rings, in m, for the cubes in the 3D plot."""
 CUBE_SIDE_M = 3.0
+"""Side length of the square calibration rings, in m. Also places the reported frame's
+origin, half a side left of and below the nearest ring's centre.
+"""
 CUBE_CENTRE_X_M = 0.0
+"""Lateral position of the ring centres, in m; 0 puts them on the calibration origin.
+Also shifts the reported frame's origin.
+"""
 CUBE_CENTRE_Z_M = 0.0
+"""Vertical position of the ring centres, in m, positive down; 0 puts them on the
+calibration origin. Also shifts the reported frame's origin.
+"""
 
 POINTS_CSV_NAME = "tracked_points.csv"
+"""File name of the per-point coordinates CSV written by save_data_to_files."""
 ANALYSIS_YAML_NAME = "side_on_analysis.yaml"
+"""File name of the YAML file with the swing values, fits, calibration and settings."""
 
 _BLUE, _ORANGE, _GREEN, _GREY, _INK = '#2a78d6', '#eb6834', '#1baf7a', '#888780', '#111111'
 
@@ -163,6 +93,7 @@ class TrackedPoint:
     v: float
 
     def __str__(self):
+        """Return the frame number and pixel position as text."""
         return f"Frame: {self.frame} u: {self.u} v: {self.v}"
 
 

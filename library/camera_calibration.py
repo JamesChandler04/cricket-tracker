@@ -1,3 +1,7 @@
+"""Calibrates the side-on camera: the user clicks the calibration cubes' ring corners in
+one frame, and the camera is solved from them by DLT and saved as an .npz file.
+"""
+
 import sys
 import json
 import numpy as np
@@ -10,18 +14,26 @@ from library import paths
 from library.helpers import Coord
 
 MAX_DISPLAY_WIDTH = 1400
+"""Largest width the frame is shown at, in px; wider frames are scaled down."""
 MAX_DISPLAY_HEIGHT = 900
+"""Largest height the frame is shown at, in px; taller frames are scaled down."""
 
 ZOOM_FACTOR = 10
+"""How many times the zoom view, toggled with 'z', magnifies the normal view."""
 ZOOM_INTERPOLATION = cv2.INTER_NEAREST
+"""Zoom interpolation: nearest-neighbour, so each raw pixel shows as a sharp block."""
 
-# Distance in metres from release to each ring's vertical face (4 rings from 3 chained cubes)
 RING_FORWARD_DISTANCES_M = [0, 3, 6, 9]
+"""Distance from release to each calibration ring, in m (4 rings, 3 chained cubes)."""
 TUNNEL_HALF_WIDTH_M = 1.5
+"""Half the width of each calibration ring, in m."""
 TUNNEL_HALF_HEIGHT_M = 1.5
+"""Half the height of each calibration ring, in m."""
 
 CALIBRATION_DEFAULT_NAME = "camera_calibration"
+"""File name the calibration is saved under when none is given (np.savez adds .npz)."""
 CORNER_LABELS = ["top_left", "top_right", "bottom_right", "bottom_left"]
+"""Names of each ring's four corners, in the order they are clicked."""
 
 
 def resection_camera(
@@ -69,6 +81,9 @@ def resection_camera(
 
 
 def save_calibration(K_inv: np.ndarray, R_T: np.ndarray, t_std: np.ndarray) -> str:
+    """Ask the user for a folder and file name, save the calibration there with np.savez
+    (which adds .npz if missing) and return that path.
+    """
     dir = input("What folder do you want to save this to? (Hit enter for default)\n")
     name = input("What do you want to call the calibration file? (Hit enter for default)\n")
     if not name:
@@ -86,10 +101,12 @@ def save_calibration(K_inv: np.ndarray, R_T: np.ndarray, t_std: np.ndarray) -> s
 
 
 def load_calibration(path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return the K_inv, R_T and t_std arrays from a saved calibration file."""
     data = np.load(path)
     return data["K_inv"], data["R_T"], data["t_std"]
 
 def choose_file_path():
+    """Ask the user to pick a file and return its path, or None if cancelled."""
     root = Tk()
     root.withdraw()
     
@@ -104,6 +121,9 @@ def choose_file_path():
     return absolute_path
 
 def main(video_path: str):
+    """Ask which frame of the video to use, let the user click every ring corner on it,
+    then solve the camera and save the calibration.
+    """
     frame = int(input("What frame do you want to calibrate on?\n"))
     num_rings = len(RING_FORWARD_DISTANCES_M)
     num_points_needed = num_rings * 4
@@ -128,6 +148,7 @@ def main(video_path: str):
     window_name = "Click ring corners in order - 'z' zoom, 'u' undo, 's' save+calibrate, 'q'/Esc quit"
 
     def next_label() -> str:
+        """Return a label for the next corner to click, or a save prompt once done."""
         ring_idx = len(points) // 4
         corner_idx = len(points) % 4
         if ring_idx >= num_rings:
@@ -181,6 +202,7 @@ def main(video_path: str):
         return int(round((x - x0 + 0.5) * scale_x)), int(round((y - y0 + 0.5) * scale_y))
 
     def toggle_zoom() -> None:
+        """Turn the zoom view on around the mouse, or back off."""
         nonlocal zoom_active, zoom_centre, zoom_transform
         if zoom_active:
             zoom_active = False
@@ -198,6 +220,7 @@ def main(video_path: str):
         print(f"Zoom on: {ZOOM_FACTOR}x around ({zoom_centre[0]}, {zoom_centre[1]}). Press 'z' again to zoom out.")
 
     def redraw():
+        """Redraw the frame (zoomed if on), the numbered corners and the title."""
         # Zoom is applied to the raw frame first, then markers are drawn on top at normal
         # size so they stay readable at any ZOOM_FACTOR.
         img = apply_zoom() if zoom_active and zoom_centre is not None else display_frame.copy()
@@ -211,6 +234,7 @@ def main(video_path: str):
         cv2.imshow(window_name, img)
 
     def on_mouse(event, x, y, flags, param):
+        """Track the mouse and add a corner, in raw frame pixels, on each left click."""
         nonlocal mouse_pos
         # Everything below works in raw frame coordinates, regardless of zoom state.
         x, y = view_to_frame_coords(x, y)
