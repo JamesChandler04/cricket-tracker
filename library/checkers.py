@@ -1,10 +1,16 @@
 """Checks on the clicked calibrations and seam angles."""
 
+from __future__ import annotations
+
 import math
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from library.helpers import Calibration
 
 class Checker:
     """Checks that flag inconsistent calibrations and a wobbling seam."""
-    def _check_calibration_difference(self, calibrations, ball_diameter_m):
+    def _check_calibration_difference(self, calibrations: list[Calibration], ball_diameter_m: float) -> tuple[float | None, bool]:
         """Return the % difference between the two calibrations' m/px and whether it is
         25% or more, or (None, False) without two usable calibrations.
         """
@@ -28,7 +34,7 @@ class Checker:
             print(f"Main calibration valid: Percentage difference {percent_diff:.2f}%")
         return percent_diff, is_invalid
     
-    def _check_seam_wobble(self, seam_measurements):
+    def _check_seam_wobble(self, seam_measurements: list[tuple[int, float]]) -> tuple[float | str | None, bool, float]:
         """Return the mean seam angle (or "Wobble Seam" if consecutive angles differ by
         over 10 degrees), the wobble flag and the largest difference.
         """

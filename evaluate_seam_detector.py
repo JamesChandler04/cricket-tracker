@@ -4,12 +4,15 @@ The detector is run on labelled ball images turned to set seam angles and on dra
 motion-blurred balls.
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import cv2
 import matplotlib.pyplot as plt
@@ -181,7 +184,7 @@ def _line_kernel(length: float, angle_deg: float) -> np.ndarray:
         kernel[y0, x0 + 1] += fx * (1 - fy)
         kernel[y0 + 1, x0] += (1 - fx) * fy
         kernel[y0 + 1, x0 + 1] += fx * fy
-    return kernel / kernel.sum()
+    return cast(np.ndarray, kernel / kernel.sum())
 
 
 def _contrast(seam: object) -> float:

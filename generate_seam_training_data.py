@@ -4,10 +4,13 @@ Each is a ball turned, moved and re-shaded on a 200 x 200 px image, black outsid
 ball, and labels.csv records the angle of its seam line and how it was made.
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
@@ -139,7 +142,7 @@ def seam_weight(bgr: np.ndarray) -> np.ndarray:
     """
     brightest = bgr.max(axis=2)
     whiteness = bgr.min(axis=2) / np.maximum(brightest, 1e-3)
-    return _smoothstep(0.35, 0.6, whiteness) * _smoothstep(0.28, 0.42, brightest)
+    return cast(np.ndarray, _smoothstep(0.35, 0.6, whiteness) * _smoothstep(0.28, 0.42, brightest))
 
 
 def shade(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -151,7 +154,7 @@ def shade(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     seam = _change_colour(bgr, rng.uniform(-SEAM_HUE_SHIFT, SEAM_HUE_SHIFT),
                           rng.uniform(*SEAM_SATURATION), rng.uniform(*SEAM_BRIGHTNESS))
     mixed = leather * (1 - weight) + seam * weight
-    return np.clip(mixed * 255 + 0.5, 0, 255).astype(np.uint8)
+    return cast(np.ndarray, np.clip(mixed * 255 + 0.5, 0, 255).astype(np.uint8))
 
 
 def _change_colour(bgr: np.ndarray, hue_shift: float, saturation: float, brightness: float) -> np.ndarray:

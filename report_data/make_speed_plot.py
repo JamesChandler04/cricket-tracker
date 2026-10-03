@@ -1,4 +1,6 @@
 """Plot radar speed against top-down measured speed range, per delivery, for one ball."""
+from __future__ import annotations
+
 import re
 from pathlib import Path
 
@@ -27,14 +29,14 @@ ROW = re.compile(r"^\s*(\d+)\s*,\s*(\d+)\s*,\s*\[([^\]]*)\]\s*,\s*(-?[\d.]+)\s*$
 """Pattern for one row of ACTUAL_FILE."""
 
 
-def load_radar(path, ball):
+def load_radar(path: Path, ball: int) -> dict[int, float]:
     """Return {delivery: speed_kmh} for one ball."""
     data = yaml.safe_load(path.read_text())
     deliveries = data.get(f"ball_{ball}", {})
     return {int(key.split("_")[1]): float(speed) for key, speed in deliveries.items()}
 
 
-def load_actual(path, ball):
+def load_actual(path: Path, ball: int) -> dict[int, list[float]]:
     """Return {delivery: [speed, ...]} for one ball."""
     speeds = {}
     for line in path.read_text().splitlines()[1:]:  # skip header
@@ -53,7 +55,7 @@ def load_actual(path, ball):
     return speeds
 
 
-def main():
+def main() -> None:
     """Draw the radar and top-down speeds for BALL, save the plot and show it."""
     radar = load_radar(RADAR_FILE, BALL)
     actual = load_actual(ACTUAL_FILE, BALL)

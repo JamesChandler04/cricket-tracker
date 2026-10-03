@@ -1,5 +1,7 @@
 """Worked example of the side-on physics engine on one delivery's clicked points."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -45,7 +47,7 @@ POINTS = [
 """Clicked ball centres of the delivery, as (frame, u, v) with u and v in px."""
 
 
-def main():
+def main() -> None:
     """Reconstruct the demo delivery, print the numbers, save them, draw both plots."""
     engine = SideOnPhysicsEngine.from_calibration_file(CALIBRATION_PATH, fps=FPS)
     calibration = engine.calibration

@@ -4,7 +4,10 @@ videos.
 The current program gets its tracked points from these clicks.
 """
 
+from __future__ import annotations
+
 import sys
+from typing import TYPE_CHECKING, Any
 
 import cv2
 
@@ -12,6 +15,10 @@ from library import calculators, checkers, display, drawers
 from library.helpers import Key, TopDownBallData, TopDownBallDataPoint, SideOnBallData, SideOnBallDataPoint, Coord, Video
 from library.physics_engines.top_down_physics_engine import SelectionType, TopDownPhysicsEngine
 from library.physics_engines.side_on_physics_engine import TrackedPoint
+
+if TYPE_CHECKING:
+    from cv2.typing import MatLike
+    from library.helpers import Calibration, FramePosition
 
 
 ZOOM_FACTOR = 10
@@ -24,28 +31,28 @@ class TopDownTracker:
     """Click-through window for the top-down video: two ball-diameter calibrations, then
     the ball's centre in each frame and, optionally, the seam.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         """Set up an empty tracker for a 72 mm ball; the video is picked in run."""
-        self.top_down_video = None
-        self.frame_positions = []
-        self.seam_points = []
-        self.seam_measurements = []
-        self.calibrations = []
-        self.meters_per_pixel = None
-        self.deceleration = None
+        self.top_down_video: Video | None = None
+        self.frame_positions: list[FramePosition] = []
+        self.seam_points: list[tuple[int, int]] = []
+        self.seam_measurements: list[tuple[int, float]] = []
+        self.calibrations: list[Calibration] = []
+        self.meters_per_pixel: float | None = None
+        self.deceleration: float | None = None
         self.calibration_active = False
         self.tracking_active = False
         self.seam_angle_active = False
         self.window_name = "Cricket Ball Tracker - Main View"
         self.ball_diameter_m = 0.072
-        self.first_frame_main = None
+        self.first_frame_main: int | None = None
 
         self.display = display.Display()
         self.drawers = drawers.Drawers()
         self.checkers = checkers.Checker()
         self.calculators = calculators.Calculators()
 
-    def _add_or_replace_point_for_frame(self, frame_no, x, y, t):
+    def _add_or_replace_point_for_frame(self, frame_no: int, x: int, y: int, t: float) -> None:
             """Store the ball position for a frame, replacing any earlier one."""
             positions = self.frame_positions
             for i, (f, *_rest) in enumerate(positions):
@@ -55,22 +62,25 @@ class TopDownTracker:
             positions.append((frame_no, int(x), int(y), t))
             positions.sort(key=lambda z: z[0])
 
-    def _mouse_callback(self, event, x, y, flags, param):
+    def _mouse_callback(self, event: int, x: int, y: int, flags: int, param: Any) -> None:
         """Handle a left click as a calibration point, ball position or seam point."""
         if event == cv2.EVENT_LBUTTONDOWN:
             if self.calibration_active:
                 if not self.calibrations or len(self.calibrations[-1][1]) == 2:
+                    assert self.top_down_video is not None
                     self.calibrations.append((self.top_down_video.get_current_frame_number(), []))
                 self.calibrations[-1][1].append((x, y))
+                assert self.top_down_video is not None
                 print(f"Main diameter point added in frame {self.top_down_video.get_current_frame_number()}: ({x}, {y})")
                 if len(self.calibrations[-1][1]) == 2:
-                    self.calibrations, self.meters_per_pixel = self.calculators._calculate_meters_per_pixel(self.calibrations, self.ball_diameter_m, self.meters_per_pixel)
+                    self.calibrations, self.meters_per_pixel = self.calculators._calculate_meters_per_pixel(self.calibrations, self.ball_diameter_m, self.meters_per_pixel)  # type: ignore[misc]  # known bug: returns None when a pair is unusable, but the result is unpacked
                     if len(self.calibrations) >= 2:
                         self.calibration_active = False
                         print("Main second calibration completed.")
                     else:
                         print("Main first calibration completed. Navigate to another frame and press 'C'.")
             elif self.tracking_active and self.meters_per_pixel is not None:
+                assert self.top_down_video is not None
                 timestamp = self.top_down_video.get_current_frame_number() / self.top_down_video.fps
                 if not self.first_frame_main:
                     self.first_frame_main = self.top_down_video.get_current_frame_number()
@@ -82,11 +92,12 @@ class TopDownTracker:
                 print(f"Seam point added: ({x}, {y})")
                 if len(self.seam_points) == 2:
                     self.seam_angle_active = False
+                    assert self.top_down_video is not None
                     print(f"Seam angle tracking stopped for frame {self.top_down_video.get_current_frame_number()}. Points: {self.seam_points[0]} and {self.seam_points[1]}")
     
 
-    def run(self):
-        """Show the top-down video and handle keys and clicks until S moves on; Q or Esc
+    def run(self) -> None:
+        """Show the top-down video and handle keys and clicks until S is clicked. Q or Esc
         ends the whole program.
         """
         self.top_down_video = self.display.load_main_video()
@@ -110,6 +121,7 @@ class TopDownTracker:
 
         while True:
             frame = self.top_down_video.get_current_frame()
+            assert frame is not None
             self.drawers.draw_main_trajectory(frame, self.frame_positions, self.top_down_video.current_frame, self.top_down_video.frame_width, self.seam_points, self.seam_measurements, self.calibrations)
 
             if self.calibration_active:
@@ -136,7 +148,7 @@ class TopDownTracker:
             cv2.imshow(self.window_name, frame)
             key_code = int(cv2.waitKey(10) & 0xFF)
             try:
-                key = Key(key_code)
+                key: Key | None = Key(key_code)
             except ValueError:
                 key = None
 
@@ -247,25 +259,25 @@ class SideOnTracker:
     """Click-through window for the side-on video: the ball's centre in each frame, with
     a zoom for precise clicks.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         """Set up an empty tracker with zoom off; the video is picked in run."""
-        self.side_on_video = None
-        self.side_positions = []
-        self.side_calibration = None
-        self.side_focal_length_px = None
+        self.side_on_video: Video | None = None
+        self.side_positions: list[FramePosition] = []
+        self.side_calibration: Calibration | None = None
+        self.side_focal_length_px: float | None = None
         self.tracking_active = False
         self.side_calibration_active = False
-        self.side_frame_for_main_frame1 = None
+        self.side_frame_for_main_frame1: int | None = None
         self.side_zoom_active = False
-        self.side_zoom_centre = None
-        self.side_mouse_pos = None
-        self._side_zoom_transform = None
+        self.side_zoom_centre: tuple[int, int] | None = None
+        self.side_mouse_pos: tuple[int, int] | None = None
+        self._side_zoom_transform: tuple[int, int, float, float, int, int] | None = None
         self.window_name_side = "Cricket Ball Tracker - Side View"
 
         self.display = display.Display()
         self.drawers = drawers.Drawers()
 
-    def _add_or_replace_point_for_frame(self, frame_no, x, y, t):
+    def _add_or_replace_point_for_frame(self, frame_no: int, x: int, y: int, t: float) -> None:
         """Store the ball position for a frame, replacing any earlier one."""
         positions = self.side_positions
         for i, (f, *_rest) in enumerate(positions):
@@ -275,7 +287,7 @@ class SideOnTracker:
         positions.append((frame_no, int(x), int(y), t))
         positions.sort(key=lambda z: z[0])
 
-    def _toggle_side_zoom(self):
+    def _toggle_side_zoom(self) -> None:
         """Turn the zoom off, or on around the mouse position."""
         if self.side_zoom_active:
             self.side_zoom_active = False
@@ -292,7 +304,7 @@ class SideOnTracker:
         self.side_zoom_centre = self.side_mouse_pos
         print(f"Side view zoom on: {ZOOM_FACTOR}x around ({self.side_zoom_centre[0]}, {self.side_zoom_centre[1]}). Press 'Z' again to zoom out.")
 
-    def _side_overlays_for_display(self):
+    def _side_overlays_for_display(self) -> tuple[list[FramePosition], Calibration | None]:
         """Return (positions, calibration) with coordinates mapped into display space."""
         if not self.side_zoom_active or self._side_zoom_transform is None:
             return self.side_positions, self.side_calibration
@@ -310,7 +322,7 @@ class SideOnTracker:
             )
         return positions, calibration
 
-    def _side_view_to_frame_coords(self, x, y):
+    def _side_view_to_frame_coords(self, x: int, y: int) -> tuple[int, int]:
         """
         Map a coordinate from the displayed side-on view back to raw frame pixels.
 
@@ -330,7 +342,7 @@ class SideOnTracker:
         row = min(row, crop_h - 1)
         return x0 + col, y0 + row
 
-    def _frame_to_side_view_coords(self, x, y):
+    def _frame_to_side_view_coords(self, x: int, y: int) -> tuple[int, int]:
         """Map raw frame pixels to the displayed side-on view (for drawing overlays)."""
         if not self.side_zoom_active or self._side_zoom_transform is None:
             return int(x), int(y)
@@ -339,12 +351,13 @@ class SideOnTracker:
         # +0.5 puts the marker in the centre of the magnified pixel block.
         return int(round((x - x0 + 0.5) * scale_x)), int(round((y - y0 + 0.5) * scale_y))
 
-    def _apply_side_zoom(self, frame):
+    def _apply_side_zoom(self, frame: MatLike) -> MatLike:
         """Crop a ZOOM_FACTOR-smaller region around the zoom centre and blow it back up to full size."""
         height, width = frame.shape[:2]
         crop_w = max(1, int(round(width / ZOOM_FACTOR)))
         crop_h = max(1, int(round(height / ZOOM_FACTOR)))
 
+        assert self.side_zoom_centre is not None
         centre_x, centre_y = self.side_zoom_centre
         x0 = min(max(int(centre_x) - crop_w // 2, 0), max(width - crop_w, 0))
         y0 = min(max(int(centre_y) - crop_h // 2, 0), max(height - crop_h, 0))
@@ -357,7 +370,7 @@ class SideOnTracker:
         self._side_zoom_transform = (x0, y0, width / crop_w, height / crop_h, crop_w, crop_h)
         return zoomed
 
-    def _mouse_callback(self, event, x, y, flags, param):
+    def _mouse_callback(self, event: int, x: int, y: int, flags: int, param: Any) -> None:
         """Track the mouse and record clicks as calibration points or ball positions."""
         # Everything below works in raw frame coordinates, regardless of zoom state.
         x, y = self._side_view_to_frame_coords(x, y)
@@ -373,6 +386,7 @@ class SideOnTracker:
                 if self.side_frame_for_main_frame1 is None:
                     print(f"Error: Track the first ball position before calibrating.")
                     return
+                assert self.side_on_video is not None
                 if self.side_on_video.get_current_frame_number() != self.side_frame_for_main_frame1:
                     print(f"Error: Side calibration must occur in first tracked frame ({self.side_frame_for_main_frame1}).")
                     return
@@ -384,6 +398,7 @@ class SideOnTracker:
                     self.side_calibration_active = False
                     print(f"Side calibration completed for frame {self.side_on_video.get_current_frame_number()}.")
             elif self.tracking_active:
+                assert self.side_on_video is not None
                 timestamp = self.side_on_video.get_current_frame_number() / self.side_on_video.fps
                 if not self.side_positions and self.side_frame_for_main_frame1 is None:
                     self.side_frame_for_main_frame1 = self.side_on_video.get_current_frame_number()
@@ -391,7 +406,7 @@ class SideOnTracker:
                 self._add_or_replace_point_for_frame(self.side_on_video.get_current_frame_number(), x, y, timestamp)
                 #print(f"Side View - Frame {self.side_on_video.get_current_frame_number()}: Ball at (x={x}, z={y}) - Time: {timestamp:.3f}s")
 
-    def run(self):
+    def run(self) -> None:
         """Show the side-on video and handle keys and clicks until S, Q or Esc."""
         self.side_on_video = self.display.load_side_video()
 
@@ -421,6 +436,7 @@ class SideOnTracker:
                 frame = self._apply_side_zoom(frame)
             display_positions, display_calibration = self._side_overlays_for_display()
 
+            assert frame is not None
             self.drawers.draw_side_trajectory(frame, display_positions, self.side_on_video.current_frame, display_calibration)
 
             if self.side_calibration_active:
@@ -443,7 +459,7 @@ class SideOnTracker:
             cv2.imshow(self.window_name_side, frame)
             key_code = int(cv2.waitKey(10) & 0xFF)
             try:
-                key = Key(key_code)
+                key: Key | None = Key(key_code)
             except ValueError:
                 key = None
 

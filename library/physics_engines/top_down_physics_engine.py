@@ -5,6 +5,8 @@ Also holds an earlier side-on engine that measured swing against a known swingle
 reference delivery; the current program uses side_on_physics_engine.py instead.
 """
 
+from __future__ import annotations
+
 import math
 import numpy as np
 import matplotlib
@@ -146,7 +148,7 @@ class TopDownPhysicsEngine:
                 return curr_point.data.seam_angle - ball_direction
         return None # If no seam angle on any points
 
-    def save_top_down_analysis(self, save_directory, file_name, velocity, seam_angle, fps, point_count):
+    def save_top_down_analysis(self, save_directory: str | Path, file_name: str, velocity: float, seam_angle: float | None, fps: float, point_count: int) -> str:
         """Write the top-down velocity and seam angle to a YAML file in save_directory."""
         directory = Path(save_directory)
         directory.mkdir(parents=True, exist_ok=True)
@@ -209,7 +211,7 @@ class SideOnPhysicsEngine:
         squared error against the ACTUAL lateral_distance_at_time formula -
         not a linear approximation of it.
         '''
-        def sse(vx0):
+        def sse(vx0: float) -> float:
             """Return the lateral fit's squared error for a trial initial speed."""
             return sum((self.lateral_distance_at_time(t, vx0, lateral_drag_coefficient) - x) ** 2 for t, x in zip(ts, xs))
         lo, hi = -50.0, 50.0

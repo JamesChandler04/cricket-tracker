@@ -2,6 +2,8 @@
 output/new data.xlsx.
 """
 
+from __future__ import annotations
+
 import pandas as pd
 from PyQt5.QtWidgets import QApplication, QWidget, QMainWindow, QPushButton
 from PyQt5.QtCore import Qt, QRect
@@ -28,7 +30,7 @@ swing = df['Parameters'].loc[df['Parameters']['Parameter'] == 'Final Swing (m)',
 
 class MainWindow(QMainWindow):
     """Fixed-size window showing the four values side by side in blue boxes."""
-    def __init__(self):
+    def __init__(self) -> None:
         """Set up a titled blue box for each value, spaced evenly across the window."""
         super().__init__()
 
@@ -76,7 +78,7 @@ class MainWindow(QMainWindow):
             title_label = PyQt5.QtWidgets.QLabel(container)
             title_label.setText(title)
             title_label.setFont(title_font)
-            title_label.setAlignment(Qt.AlignCenter)
+            title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             title_label.setGeometry(padding, padding, rect_w - padding * 2, title_height)
             title_label.setStyleSheet("color: white; background: transparent;")
 
@@ -84,7 +86,7 @@ class MainWindow(QMainWindow):
             value_label = PyQt5.QtWidgets.QLabel(container)
             value_label.setText(value)
             value_label.setFont(value_font)
-            value_label.setAlignment(Qt.AlignCenter)
+            value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             value_label.setGeometry(padding, padding + title_height, rect_w - padding * 2, value_height)
             value_label.setStyleSheet("color: white; background: transparent;")
 

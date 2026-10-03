@@ -1,20 +1,37 @@
 """Saves the old tracker's results to an Excel workbook. Not used by any program."""
 
+from __future__ import annotations
+
 import os
 import math
+from typing import TYPE_CHECKING
 import pandas as pd
 from datetime import datetime
 
 from library import calculators, checkers
 
+if TYPE_CHECKING:
+    from library.helpers import Calibration, FramePosition
+
 class Exporter:
     """Mixin that saves the tracking results to an Excel workbook."""
-    def __init__(self):
+    # Attributes of the class this mixin is mixed into, which excel reads.
+    frame_positions: list[FramePosition]
+    frame_height: int
+    meters_per_pixel: float | None
+    seam_measurements: list[tuple[int, float]]
+    calibrations: list[Calibration]
+    BALL_DIAMETER_M: float
+    side_calibration: Calibration | None
+    side_frame_for_main_frame1: int | None
+    side_focal_length_px: float | None
+
+    def __init__(self) -> None:
         """Set up the calculators and checkers the export uses."""
         self.calculators = calculators.Calculators()
         self.checkers = checkers.Checker()
     
-    def excel(self):
+    def excel(self) -> None:
         """Ask in the console for a folder and file name, then save the tracking data,
         parameters, seam angles and calibrations as an Excel workbook.
         """
@@ -22,12 +39,12 @@ class Exporter:
             print("No tracking data to save.")
             return
 
-        df, initial_speed_kmh = self._build_dataframe()
+        df, initial_speed_kmh = self._build_dataframe()  # type: ignore[attr-defined]
         if df is None:
             print("No data to save.")
             return
 
-        df_3d_data = self._build_3d_data()
+        df_3d_data = self._build_3d_data()  # type: ignore[attr-defined]
         initial_trajectory = self.calculators._calculate_initial_trajectory(self.frame_positions, self.frame_height, self.meters_per_pixel)
         seam_angle, is_wobble, max_seam_diff = self.checkers._check_seam_wobble(self.seam_measurements)
         percent_diff, is_invalid_cal = self.checkers._check_calibration_difference(self.calibrations, self.BALL_DIAMETER_M)
@@ -72,6 +89,7 @@ class Exporter:
                 idx = None
                 if "Frame Number" in df_3d_data.columns:
                     # use first occurrence
+                    assert self.side_frame_for_main_frame1 is not None
                     idx = df_3d_data.index[df_3d_data["Frame Number"] == (frame_num - self.side_frame_for_main_frame1 + 1)].tolist()
                     if idx:
                         y_m = df_3d_data.loc[idx[0], "Y-Position (m)"]

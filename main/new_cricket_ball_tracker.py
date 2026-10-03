@@ -3,6 +3,8 @@
 Kept for reference only; the current program is main/GUI_new_cricket_ball_tracker.py.
 """
 
+from __future__ import annotations
+
 import sys
 import yaml
 from pathlib import Path
@@ -34,7 +36,7 @@ CALIBRATION_PATH = str(paths.CALIBRATION_PATH)
 DISPLAY_3D_PLOT = False
 """Whether the 3D trajectory plot is shown in a window as well as saved."""
 
-def top_down():
+def top_down() -> tuple[float, list[float], float | None]:
     """Let the user mark the ball and seam in the top-down video, then print and save
     the speed and seam angle. Return the mean speed and the speeds between consecutive
     marked points in km/h, and the seam angle in degrees (or None).
@@ -44,6 +46,7 @@ def top_down():
     clicked_points = tracker.get_top_down_points()
 
     engine = TopDownPhysicsEngine()
+    assert tracker.top_down_video is not None
     fps = tracker.top_down_video.fps
 
     # Calculate velocity using the clicked points and fps
@@ -60,7 +63,7 @@ def top_down():
 
     return velocity, velocity_list, seam_angle
 
-def side_on(velocity):
+def side_on(velocity: float) -> None:
     """Let the user mark the ball in the side-on video, then print and save its 3D path,
     swing and plots, at the given speed in km/h or one the user enters.
     """
@@ -72,6 +75,7 @@ def side_on(velocity):
     tracker = SideOnTracker()
     clicked_points = tracker.get_side_on_points()
 
+    assert tracker.side_on_video is not None
     fps = tracker.side_on_video.fps
 
     engine = SideOnPhysicsEngine.from_calibration_file(CALIBRATION_PATH, fps=fps)
@@ -129,6 +133,7 @@ with open(paths.REPORT_DATA_DIR / "radar_speeds.yaml", "r") as f:
         sys.exit()
 
 with open(paths.REPORT_DATA_DIR / "actual_top_down_data.csv", "a") as f:
+    assert angle is not None
     f.write(f"{ball},{delivery_num},{[int(v) for v in vel_list]},{int(angle)}\n")
     print(f"Data saved as {ball},{delivery_num},{[int(v) for v in vel_list]},{int(angle)}")
 

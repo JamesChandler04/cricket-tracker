@@ -2,11 +2,22 @@
 video reader and a JSON settings loader.
 """
 
+from __future__ import annotations
+
 from enum import Enum
 from dataclasses import dataclass
 import math
+from typing import TYPE_CHECKING, Any, cast
 import cv2
 import numpy as np
+
+if TYPE_CHECKING:
+    from cv2.typing import MatLike
+
+FramePosition = tuple[int, int, int, float]
+"""A tracked ball position: (frame number, x in px, y in px, time in s)."""
+Calibration = tuple[int, list[tuple[int, int]]]
+"""A ball-diameter calibration: (frame number, [(x1, y1), (x2, y2)] in px)."""
 
 class Key(Enum):
     """Key codes from cv2.waitKey for the keys the OpenCV windows use."""
@@ -19,9 +30,9 @@ class Key(Enum):
     space = ord(' ')
     """Space bar, which starts or pauses ball tracking."""
     a = ord('a')
-    """Lower-case a, which steps back one frame."""
+    """Lowercase a, which steps back one frame."""
     d = ord('d')
-    """Lower-case d, which steps forward one frame."""
+    """Lowercase d, which steps forward one frame."""
     s = ord('s')
     """S key, which saves or moves on to the next step."""
     o = ord('o')
@@ -31,13 +42,13 @@ class Key(Enum):
     t = ord('t')
     """T key, which starts or stops seam angle mode."""
     A = ord('A')
-    """Capital A (Shift+A), which steps back 10 frames."""
+    """Capital A, which steps back 10 frames."""
     D = ord('D')
-    """Capital D (Shift+D), which steps forward 10 frames."""
+    """Capital D, which steps forward 10 frames."""
     f = ord('f')
-    """F key, which looks for the ball automatically in the old program."""
+    """F key, which looks for the ball automatically in the automatic ball tracker."""
     b = ord('b')
-    """B key, which sets the background frame for ball finding in the old program."""
+    """B key, which sets the background frame for ball finding in the automatic ball tracker."""
     z = ord('z')
     """Z key, which toggles the side-on zoom."""
 
@@ -49,29 +60,29 @@ class Coord:
 
     def distance_to(self, other: 'Coord') -> float:
         """Return the straight-line distance to another point, in px."""
-        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
+        return cast(float, ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5)
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Return the point as (x, y) text."""
         return f"({self.x}, {self.y})"
     
-    def __add__(self, other: 'Coord'):
+    def __add__(self, other: 'Coord') -> Coord:
         """Return the sum of two points."""
         return Coord(self.x + other.x, self.y + other.y)
 
-    def __sub__(self, other: 'Coord'):
+    def __sub__(self, other: 'Coord') -> Coord:
         """Return this point minus another."""
         return Coord(self.x - other.x, self.y - other.y)
 
-    def __mul__(self, scalar: float):
+    def __mul__(self, scalar: float) -> Coord:
         """Return the point scaled by a number, truncated to whole pixels."""
         return Coord(int(self.x * scalar), int(self.y * scalar))
 
-    def __truediv__(self, scalar: float):
+    def __truediv__(self, scalar: float) -> Coord:
         """Return the point divided by a number, truncated to whole pixels."""
         return Coord(int(self.x / scalar), int(self.y / scalar))
 
-    def __floor__(self, scalar: float):
+    def __floor__(self, scalar: float) -> Coord:
         """Return the point divided by a number, truncated; the same as /."""
         return Coord(int(self.x / scalar), int(self.y / scalar))    
 
@@ -85,7 +96,7 @@ class TopDownBallData:
     seam_end: Coord | None
     seam_angle: float | None
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Return the ball data as one line of text."""
         return (f"BallData(top_left={self.top_left}, "
                 f"bottom_right={self.bottom_right}, "
@@ -94,12 +105,14 @@ class TopDownBallData:
                 f"seam_end={self.seam_end}, "
                 f"seam_angle={self.seam_angle} degrees)")
 
-    def calc_seam_angle(self):
+    def calc_seam_angle(self) -> None:
         """Set seam_angle to the seam's image angle in degrees, clockwise from +x."""
+        assert self.seam_end is not None and self.seam_start is not None
         self.seam_angle = math.degrees(math.atan2(self.seam_end.y - self.seam_start.y, self.seam_end.x - self.seam_start.x))
 
-    def calc_centre(self):
+    def calc_centre(self) -> None:
         """Set centre to the midpoint of top_left and bottom_right."""
+        assert self.top_left is not None and self.bottom_right is not None
         self.centre = Coord(
             x=(self.top_left.x + self.bottom_right.x) // 2,
             y=(self.top_left.y + self.bottom_right.y) // 2
@@ -112,13 +125,13 @@ class SideOnBallData:
     bottom_right: Coord
     centre: Coord
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Return the ball data as one line of text."""
         return (f"BallData(top_left={self.top_left}, "
                 f"bottom_right={self.bottom_right}, "
                 f"centre={self.centre})")
     
-    def calc_centre(self):
+    def calc_centre(self) -> None:
         """Set centre to the midpoint of top_left and bottom_right."""
         self.centre = Coord(
             x=(self.top_left.x + self.bottom_right.x) // 2,
@@ -127,7 +140,7 @@ class SideOnBallData:
 
 class Video:
     """Video file read one frame at a time, with caching and 90 degree rotation."""
-    def __init__(self, path: str):
+    def __init__(self, path: str) -> None:
         """Open the video at path and read its frame count, size and frame rate."""
         self.cap = cv2.VideoCapture(path)
         if not self.cap.isOpened():
@@ -139,7 +152,7 @@ class Video:
         self._cached_frame: np.ndarray | None = None
         self._cached_frame_index = -1
 
-    def _get_frame_data(self):
+    def _get_frame_data(self) -> None:
         """Read the frame count, size and fps (asked for in the console if missing)."""
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -161,7 +174,7 @@ class Video:
         
         print(f"Main video FPS: {self.fps:.2f}")
     
-    def get_current_frame(self):
+    def get_current_frame(self) -> MatLike | None:
         """Return the current frame, rotated, or None if it cannot be read."""
         if self._cached_frame is not None and self._cached_frame_index == self.current_frame:
             return self._rotate_frame(self._cached_frame.copy())
@@ -175,11 +188,11 @@ class Video:
         self._cached_frame_index = self.current_frame
         return self._rotate_frame(frame)
     
-    def get_current_frame_number(self):
+    def get_current_frame_number(self) -> int:
         """Return the index of the current frame."""
         return self.current_frame
 
-    def change_frame(self, offset: int):
+    def change_frame(self, offset: int) -> None:
         """Move offset frames, staying within the video, and cache the new frame."""
         new_frame = self.current_frame + offset
         if new_frame < 0:
@@ -208,11 +221,11 @@ class Video:
             self._cached_frame = None
             self._cached_frame_index = -1
 
-    def rotate(self):
+    def rotate(self) -> None:
         """Turn the video a further 90 degrees clockwise."""
         self.rotation = (self.rotation + 90) % 360
 
-    def _rotate_frame(self, frame):
+    def _rotate_frame(self, frame: MatLike) -> MatLike:
         """Return the frame turned by the current rotation."""
         match self.rotation:
             case 90:
@@ -226,17 +239,17 @@ class Video:
             
 class Config:
     """Settings loaded from a JSON file."""
-    def __init__(self, path: str):
+    def __init__(self, path: str) -> None:
         """Load the settings from the JSON file at path."""
         self.path = path
         self.data = self._load_config()
 
-    def _load_config(self):
+    def _load_config(self) -> dict[str, Any]:
         """Return the file's JSON contents, or an empty dict if it cannot be read."""
         import json
         try:
             with open(self.path, 'r') as f:
-                return json.load(f)
+                return cast(dict[str, Any], json.load(f))
         except Exception as e:
             print(f"Error loading config file: {e}")
             return {}
@@ -247,7 +260,7 @@ class TopDownBallDataPoint:
     frame_number: int
     data: TopDownBallData
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Return the frame number and ball data as one line of text."""
         return f"Frame {self.frame_number}: {self.data}"
 
@@ -257,6 +270,6 @@ class SideOnBallDataPoint:
     frame_number: int
     data: SideOnBallData
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Return the frame number and ball data as one line of text."""
         return f"Frame {self.frame_number}: {self.data}"

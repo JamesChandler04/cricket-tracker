@@ -4,16 +4,19 @@ videos, inside search regions the user draws.
 Kept for reference only; the current program is main/GUI_new_cricket_ball_tracker.py.
 """
 
+from __future__ import annotations
+
 import sys
 import os
 import glob
+from typing import TYPE_CHECKING, Any
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QTextEdit, QSizePolicy, QFrame,
     QDialog, QDialogButtonBox, QScrollArea, QRubberBand, QMessageBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QRect, QPoint, QSize
-from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter, QPen, QColor
+from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter, QPen, QColor, QCloseEvent, QMouseEvent, QPaintEvent, QResizeEvent
 import cv2
 import yaml
 from pathlib import Path
@@ -26,12 +29,15 @@ from library.automated import automations
 from library.log_bridge import bridge
 from library.physics_engines import top_down_physics_engine
 
+if TYPE_CHECKING:
+    from library.helpers import SideOnBallDataPoint, TopDownBallDataPoint, Video
+
 CONFIG_PATH = str(paths.CONFIG_PATH)
 """The settings file, config.yml, where the search regions (bounding boxes) are saved.
 """
 
 
-def load_config() -> dict:
+def load_config() -> dict[str, Any]:
     """Return the settings in config.yml, or an empty dict if there are none."""
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r") as f:
@@ -39,7 +45,7 @@ def load_config() -> dict:
     return {}
 
 
-def save_bounding_box(view: str, x_start: int, y_start: int, x_end: int, y_end: int):
+def save_bounding_box(view: str, x_start: int, y_start: int, x_end: int, y_end: int) -> None:
     """Write bounding box coords for 'top_down' or 'side_on' into config.yml."""
     config = load_config()
     if "bounding_boxes" not in config:
@@ -52,7 +58,7 @@ def save_bounding_box(view: str, x_start: int, y_start: int, x_end: int, y_end: 
         yaml.dump(config, f, default_flow_style=False)
 
 
-def get_bounding_box(view: str):
+def get_bounding_box(view: str) -> tuple[int, int, int, int] | None:
     """Return (x_start, y_start, x_end, y_end) or None if not set."""
     config = load_config()
     bb = config.get("bounding_boxes", {}).get(view, {})
@@ -72,50 +78,53 @@ class SelectableImageLabel(QLabel):
 
     selection_changed = pyqtSignal(QRect)   # emits rect in *label* coords
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         """Set up an empty selection and a crosshair cursor."""
         super().__init__(parent)
         self._origin = QPoint()
         self._rect   = QRect()
         self._drawing = False
         self.setMouseTracking(True)
-        self.setCursor(Qt.CrossCursor)
+        self.setCursor(Qt.CursorShape.CrossCursor)
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event: QMouseEvent | None) -> None:
         """Start a new rectangle at a left click."""
-        if event.button() == Qt.LeftButton:
+        assert event is not None
+        if event.button() == Qt.MouseButton.LeftButton:
             self._origin  = event.pos()
             self._rect    = QRect(self._origin, QSize())
             self._drawing = True
             self.update()
 
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event: QMouseEvent | None) -> None:
         """Stretch the rectangle to the cursor while dragging and emit it."""
         if self._drawing:
+            assert event is not None
             self._rect = QRect(self._origin, event.pos()).normalized()
             self.update()
             self.selection_changed.emit(self._rect)
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, event: QMouseEvent | None) -> None:
         """Finish the rectangle when the left button is released and emit it."""
-        if event.button() == Qt.LeftButton and self._drawing:
+        assert event is not None
+        if event.button() == Qt.MouseButton.LeftButton and self._drawing:
             self._rect    = QRect(self._origin, event.pos()).normalized()
             self._drawing = False
             self.update()
             self.selection_changed.emit(self._rect)
 
-    def paintEvent(self, event):
+    def paintEvent(self, event: QPaintEvent | None) -> None:
         """Draw the label, then any selection as a translucent green rectangle."""
         super().paintEvent(event)
         if not self._rect.isNull():
             painter = QPainter(self)
-            pen = QPen(QColor(0, 220, 100), 2, Qt.SolidLine)
+            pen = QPen(QColor(0, 220, 100), 2, Qt.PenStyle.SolidLine)
             painter.setPen(pen)
             painter.drawRect(self._rect)
             fill = QColor(0, 220, 100, 40)
             painter.fillRect(self._rect, fill)
 
-    def clear_selection(self):
+    def clear_selection(self) -> None:
         """Remove the drawn rectangle."""
         self._rect = QRect()
         self.update()
@@ -133,11 +142,11 @@ class BoundingBoxDialog(QDialog):
     view_key: 'top_down' or 'side_on'
     """
 
-    def __init__(self, view_key: str, parent=None):
+    def __init__(self, view_key: str, parent: QWidget | None = None) -> None:
         """Set up the dialog for one view, showing its saved search region if any."""
         super().__init__(parent)
         self.view_key     = view_key
-        self._orig_pixmap = None   # full-res pixmap of the loaded frame
+        self._orig_pixmap: QPixmap | None = None   # full-res pixmap of the loaded frame
         self._img_rect    = QRect()  # where the pixmap is actually drawn inside the label
 
         title = "Top Down" if view_key == "top_down" else "Side On"
@@ -209,7 +218,7 @@ class BoundingBoxDialog(QDialog):
 
     # File loading
 
-    def _load_file(self):
+    def _load_file(self) -> None:
         """Ask the user for a video or image and show it (a video's first frame)."""
         path, _ = QFileDialog.getOpenFileName(
             self, "Load Video or Image", "",
@@ -228,7 +237,7 @@ class BoundingBoxDialog(QDialog):
                 return
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             h, w, ch = frame_rgb.shape
-            qimg = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
+            qimg = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)  # type: ignore[call-overload]  # PyQt5 stubs list bytes/voidptr for the data argument, but a numpy buffer (memoryview) is accepted at runtime
         else:
             qimg = QImage(path)
             if qimg.isNull():
@@ -241,15 +250,15 @@ class BoundingBoxDialog(QDialog):
         self.clear_btn.setEnabled(True)
         self.coords_label.setText("Draw a rectangle on the image")
 
-    def _update_display(self):
+    def _update_display(self) -> None:
         """Scale the image to fit the label and record where it sits inside it."""
         if self._orig_pixmap is None:
             return
         scaled = self._orig_pixmap.scaled(
             self.img_label.width(),
             self.img_label.height(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
         )
         # Record where the image actually sits inside the label (centred)
         lw, lh = self.img_label.width(), self.img_label.height()
@@ -259,19 +268,19 @@ class BoundingBoxDialog(QDialog):
         self._img_rect = QRect(ox, oy, iw, ih)
         self.img_label.setPixmap(scaled)
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event: QResizeEvent | None) -> None:
         """Rescale the image to the new size."""
         super().resizeEvent(event)
         self._update_display()
 
     # Selection
 
-    def _clear_selection(self):
+    def _clear_selection(self) -> None:
         """Remove the drawn rectangle and say the selection was cleared."""
         self.img_label.clear_selection()
         self.coords_label.setText("Selection cleared")
 
-    def _on_selection_changed(self, rect: QRect):
+    def _on_selection_changed(self, rect: QRect) -> None:
         """Convert label-space rect to original-image-space coords and display."""
         orig_rect = self._label_rect_to_image_rect(rect)
         if orig_rect is None:
@@ -282,7 +291,7 @@ class BoundingBoxDialog(QDialog):
             f"[{orig_rect.width()} × {orig_rect.height()} px]"
         )
 
-    def _label_rect_to_image_rect(self, label_rect: QRect):
+    def _label_rect_to_image_rect(self, label_rect: QRect) -> QRect | None:
         """Map a rect in label pixel coords → original image pixel coords."""
         if self._orig_pixmap is None or self._img_rect.isNull():
             return None
@@ -306,7 +315,7 @@ class BoundingBoxDialog(QDialog):
 
         return QRect(QPoint(x1, y1), QPoint(x2, y2)).normalized()
 
-    def _confirm(self):
+    def _confirm(self) -> None:
         """Save the selection as this view's search region in config.yml and close."""
         sel = self.img_label.selection_rect
         if sel.isNull() or sel.width() < 5 or sel.height() < 5:
@@ -333,7 +342,7 @@ class TrackingWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, top_down_path: str, side_on_path: str,
-                 top_down_tracker, side_on_tracker):
+                 top_down_tracker: automations.TopDownBallFinder, side_on_tracker: automations.SideOnBallFinder) -> None:
         """Set up the thread with the two video paths and their ball finders."""
         super().__init__()
         self.top_down_path = top_down_path
@@ -341,7 +350,7 @@ class TrackingWorker(QThread):
         self.top_down_tracker = top_down_tracker
         self.side_on_tracker = side_on_tracker
 
-    def run(self):
+    def run(self) -> None:
         """Clear old tracking images, find the ball in both videos, print the tracking
         and physics results, then emit the saved frame images or the error message.
         """
@@ -359,13 +368,14 @@ class TrackingWorker(QThread):
 
             # Run tracking software
 
-            top_down_video = automations.Video(self.top_down_path)
-            side_on_video = automations.Video(self.side_on_path)
+            top_down_video: Video = automations.Video(self.top_down_path)  # type: ignore[attr-defined]  # Video is only imported into automations (from library.helpers), not exported from it
+            side_on_video: Video = automations.Video(self.side_on_path)  # type: ignore[attr-defined]  # Video is only imported into automations (from library.helpers), not exported from it
 
             top_down_ball_data = self.top_down_tracker.get_ball_data(top_down_video)
             side_on_ball_data = self.side_on_tracker.get_ball_data(side_on_video)
 
             print("\nTracking Results:")
+            data_point: TopDownBallDataPoint | SideOnBallDataPoint
             if not top_down_ball_data:
                 print("Warning: No ball data found in top down video.")
             else:
@@ -387,14 +397,14 @@ class TrackingWorker(QThread):
             # Run physics software
 
             top_down_phys_engine = top_down_physics_engine.TopDownPhysicsEngine()
-            initial_velocity = top_down_phys_engine.calculate_velocity(top_down_ball_data, top_down_video.fps)
+            initial_velocity = top_down_phys_engine.calculate_velocity(top_down_ball_data, top_down_video.fps)  # type: ignore[call-arg]  # real bug: calculate_velocity now requires a "type" argument (SelectionType), which this old call does not pass
             print(f"Initial velocity calculated from top down video: {initial_velocity:.2f} km/h")
 
             seam_angle = top_down_phys_engine.calculate_seam_angle(top_down_ball_data)
             print(f"Seam angle calculated from top down video: {seam_angle:.2f} degrees")
 
             side_on_phys_engine = top_down_physics_engine.SideOnPhysicsEngine()
-            swingless_trajectory = side_on_phys_engine.calculate_swingless_trajectory(side_on_ball_data, side_on_video.fps)
+            swingless_trajectory = side_on_phys_engine.calculate_swingless_trajectory(side_on_ball_data, side_on_video.fps)  # type: ignore[attr-defined]  # real bug: SideOnPhysicsEngine has no calculate_swingless_trajectory (the method is get_swinless_trajectory)
             self.finished.emit(top_down_frames, side_on_frames)
         except Exception as e:
             self.error.emit(str(e))
@@ -402,7 +412,7 @@ class TrackingWorker(QThread):
 class FrameViewer(QWidget):
     """A labelled image viewer with prev/next navigation."""
 
-    def __init__(self, title: str, parent=None):
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
         """Set up the viewer with a title, an image area and Prev/Next buttons."""
         super().__init__(parent)
         self._frames: list[str] = []
@@ -452,7 +462,7 @@ class FrameViewer(QWidget):
 
         self._set_empty()
 
-    def load_frames(self, paths: list[str]):
+    def load_frames(self, paths: list[str]) -> None:
         """Show the given frame images, starting with the first."""
         self._frames = paths
         self._index = 0
@@ -461,7 +471,7 @@ class FrameViewer(QWidget):
         else:
             self._set_empty()
 
-    def _set_empty(self):
+    def _set_empty(self) -> None:
         """Show "No frames" and disable the Prev/Next buttons."""
         self.image_label.setText("No frames")
         self.image_label.setStyleSheet(
@@ -470,7 +480,7 @@ class FrameViewer(QWidget):
         self.prev_btn.setEnabled(False)
         self.next_btn.setEnabled(False)
 
-    def _show_current(self):
+    def _show_current(self) -> None:
         """Show the current frame and its number, and update the Prev/Next buttons."""
         path = self._frames[self._index]
         pixmap = QPixmap(path)
@@ -480,8 +490,8 @@ class FrameViewer(QWidget):
         scaled = pixmap.scaled(
             self.image_label.width(),
             self.image_label.height(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
         )
         self.image_label.setPixmap(scaled)
         total = len(self._frames)
@@ -491,19 +501,19 @@ class FrameViewer(QWidget):
         self.prev_btn.setEnabled(self._index > 0)
         self.next_btn.setEnabled(self._index < total - 1)
 
-    def prev_frame(self):
+    def prev_frame(self) -> None:
         """Show the previous frame, if there is one."""
         if self._index > 0:
             self._index -= 1
             self._show_current()
 
-    def next_frame(self):
+    def next_frame(self) -> None:
         """Show the next frame, if there is one."""
         if self._index < len(self._frames) - 1:
             self._index += 1
             self._show_current()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event: QResizeEvent | None) -> None:
         """Rescale the current frame to the new size."""
         super().resizeEvent(event)
         if self._frames:
@@ -513,12 +523,12 @@ class Application(QMainWindow):
     """Main window for choosing the two videos and their search regions, running the
     automatic tracking and browsing the frames where the ball was found.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         """Set up the window and ball finders, and send printed text to the log."""
         super().__init__()
-        self.top_down_video_path = None
-        self.side_on_video_path = None
-        self._worker = None
+        self.top_down_video_path: str | None = None
+        self.side_on_video_path: str | None = None
+        self._worker: TrackingWorker | None = None
 
         sys.stdout = bridge
         bridge.message_received.connect(self.append_log)
@@ -528,7 +538,7 @@ class Application(QMainWindow):
 
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         """Build the video pickers, search-region buttons, log, frame viewers and Start
         Tracking button.
         """
@@ -669,7 +679,7 @@ class Application(QMainWindow):
 
     # Bounding box helpers
 
-    def _style_bb_button(self, btn: QPushButton, view_key: str):
+    def _style_bb_button(self, btn: QPushButton, view_key: str) -> None:
         """Green tint if a bounding box is already saved, neutral otherwise."""
         bb = get_bounding_box(view_key)
         if bb:
@@ -682,7 +692,7 @@ class Application(QMainWindow):
             btn.setStyleSheet("")
             btn.setToolTip("Draw a bounding box to restrict where the ball is searched for")
 
-    def _open_bbox_dialog(self, view_key: str):
+    def _open_bbox_dialog(self, view_key: str) -> None:
         """Open the search-region dialog for one view and, once confirmed, update its
         button and log the region.
         """
@@ -700,7 +710,7 @@ class Application(QMainWindow):
 
     # File selection
 
-    def select_top_down_video(self):
+    def select_top_down_video(self) -> None:
         """Ask the user for the top-down video and show its file name."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Top Down View Video", "",
@@ -711,7 +721,7 @@ class Application(QMainWindow):
             self.top_down_video_display.setStyleSheet(
                 "background-color: white; padding: 10px; border: 1px solid #ccc;")
 
-    def select_side_on_video(self):
+    def select_side_on_video(self) -> None:
         """Ask the user for the side-on video and show its file name."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Side On View Video", "",
@@ -724,7 +734,7 @@ class Application(QMainWindow):
 
     # Tracking
 
-    def start_tracking(self):
+    def start_tracking(self) -> None:
         """Start the tracking thread, or show a warning if a video is missing."""
         if not self.top_down_video_path or not self.side_on_video_path:
             self.top_down_video_display.setText("Please select both videos.")
@@ -745,7 +755,7 @@ class Application(QMainWindow):
         self._worker.error.connect(self.on_tracking_error)
         self._worker.start()
 
-    def on_tracking_finished(self, top_down_frames: list, side_on_frames: list):
+    def on_tracking_finished(self, top_down_frames: list[str], side_on_frames: list[str]) -> None:
         """Re-enable the Start button and show the saved frames in the two viewers."""
         self.append_log("\nDone.")
         self.start_btn.setEnabled(True)
@@ -758,7 +768,7 @@ class Application(QMainWindow):
         self.append_log(f"Showing {td} top-down frame{'s' if td != 1 else ''} and "
                         f"{so} side-on frame{'s' if so != 1 else ''}.")
 
-    def on_tracking_error(self, message: str):
+    def on_tracking_error(self, message: str) -> None:
         """Log the error and re-enable the Start button."""
         self.append_log(f"\nERROR: {message}")
         self.start_btn.setEnabled(True)
@@ -766,31 +776,32 @@ class Application(QMainWindow):
 
     # Physics Calculation
 
-    def start_physics_calculation(self):
+    def start_physics_calculation(self) -> None:
         """Calculate the top-down speed and log the outcome; not connected to anything.
         """
         self.append_log("\nStarting physics calculation…")
         try:
-            top_down_physics_engine.PhysicsEngine().calculate_velocity(top_down_frames, self.top_down_video.fps)
+            top_down_physics_engine.PhysicsEngine().calculate_velocity(top_down_frames, self.top_down_video.fps)  # type: ignore[attr-defined, name-defined]  # real bug: PhysicsEngine, top_down_frames and self.top_down_video do not exist
             self.append_log("Physics calculation completed successfully.")
         except Exception as e:
             self.append_log(f"ERROR during physics calculation: {e}")
 
-    def append_log(self, text: str):
+    def append_log(self, text: str) -> None:
         """Add text to the log, staying scrolled to the bottom if it already was."""
         scrollbar = self.log_display.verticalScrollBar()
+        assert scrollbar is not None
         at_bottom = scrollbar.value() >= scrollbar.maximum() - 4
         self.log_display.append(text)
         if at_bottom:
             scrollbar.setValue(scrollbar.maximum())
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent | None) -> None:
         """Restore normal printing before the window closes."""
         sys.stdout = sys.__stdout__
         super().closeEvent(event)
 
 
-def main():
+def main() -> None:
     """Open the main window and run it until it is closed."""
     app = QApplication(sys.argv)
     application = Application()

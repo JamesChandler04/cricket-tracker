@@ -4,6 +4,8 @@ clicked in OpenCV windows and the results saved to Excel.
 Kept for reference only; the current program is main/GUI_new_cricket_ball_tracker.py.
 """
 
+from __future__ import annotations
+
 import cv2
 import numpy as np
 import pandas as pd
@@ -24,6 +26,10 @@ from library import calculators, checkers, display, drawers, paths
 from library.automated import automations
 from library.helpers import Key, Video, Config
 
+if typing.TYPE_CHECKING:
+    from cv2.typing import MatLike
+    from library.helpers import Calibration, FramePosition
+
 if not typing.TYPE_CHECKING:
     import xlsxwriter # Used when saving to excel
 
@@ -38,34 +44,34 @@ class CricketBallTracker:
     """Hand tracker for clicking the ball in a top-down then a side-on video and saving
     the measurements to Excel.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         """Set up empty tracking state, the helpers and the settings from config.yml."""
-        self.frame_positions = []  # (frame_number, x_px, y_px, time_s) for main view
-        self.side_positions = []   # (frame_number, x_px, z_px, time_s) for side view
-        self.meters_per_pixel = None
-        self.side_focal_length_px = None
+        self.frame_positions: list[FramePosition] = []  # (frame_number, x_px, y_px, time_s) for main view
+        self.side_positions: list[FramePosition] = []   # (frame_number, x_px, z_px, time_s) for side view
+        self.meters_per_pixel: float | None = None
+        self.side_focal_length_px: float | None = None
         self.tracking_active = False
         self.seam_angle_active = False
         self.calibration_active = False
         self.side_calibration_active = False
-        self.seam_points = []
-        self.seam_measurements = []  # (frame_number, angle)
-        self.calibrations = []  # Main view: (frame_number, [(x1, y1), (x2, y2)])
-        self.side_calibration = None  # Side view: (frame_number, [(x1, z1), (x2, z2)])
+        self.seam_points: list[tuple[int, int]] = []
+        self.seam_measurements: list[tuple[int, float]] = []  # (frame_number, angle)
+        self.calibrations: list[Calibration] = []  # Main view: (frame_number, [(x1, y1), (x2, y2)])
+        self.side_calibration: Calibration | None = None  # Side view: (frame_number, [(x1, z1), (x2, z2)])
         self.window_name = "Cricket Ball Tracker - Main View"
         self.window_name_side = "Cricket Ball Tracker - Side View"
-        self.initial_velocity = None
-        self.deceleration = None
+        self.initial_velocity: float | None = None
+        self.deceleration: float | None = None
         self.BALL_DIAMETER_M = 0.072  # Cricket ball diameter in meters
-        self.first_frame_main = None
-        self.side_frame_for_main_frame1 = None
+        self.first_frame_main: int | None = None
+        self.side_frame_for_main_frame1: int | None = None
 
         self.side_zoom_active = False
-        self.side_zoom_centre = None      # (x, y) in raw frame coordinates
-        self.side_mouse_pos = None        # last known mouse position, in raw frame coordinates
-        self._side_zoom_transform = None  # (x0, y0, scale_x, scale_y, crop_w, crop_h)
+        self.side_zoom_centre: tuple[int, int] | None = None      # (x, y) in raw frame coordinates
+        self.side_mouse_pos: tuple[int, int] | None = None        # last known mouse position, in raw frame coordinates
+        self._side_zoom_transform: tuple[int, int, float, float, int, int] | None = None  # (x0, y0, scale_x, scale_y, crop_w, crop_h)
 
-        self.background_frame_top = None
+        self.background_frame_top: MatLike | None = None
 
         self.drawers = drawers.Drawers()
         self.display = display.Display()
@@ -77,7 +83,7 @@ class CricketBallTracker:
         with open(paths.CONFIG_PATH, "r") as f:
             self.config_file = yaml.safe_load(f)
 
-    def _side_view_to_frame_coords(self, x, y):
+    def _side_view_to_frame_coords(self, x: float, y: float) -> tuple[int, int]:
         """
         Map a coordinate from the displayed side-on view back to raw frame pixels.
 
@@ -97,7 +103,7 @@ class CricketBallTracker:
         row = min(row, crop_h - 1)
         return x0 + col, y0 + row
 
-    def _frame_to_side_view_coords(self, x, y):
+    def _frame_to_side_view_coords(self, x: float, y: float) -> tuple[int, int]:
         """Map raw frame pixels to the displayed side-on view (for drawing overlays)."""
         if not self.side_zoom_active or self._side_zoom_transform is None:
             return int(x), int(y)
@@ -106,12 +112,13 @@ class CricketBallTracker:
         # +0.5 puts the marker in the centre of the magnified pixel block.
         return int(round((x - x0 + 0.5) * scale_x)), int(round((y - y0 + 0.5) * scale_y))
 
-    def _apply_side_zoom(self, frame):
+    def _apply_side_zoom(self, frame: MatLike) -> MatLike:
         """Crop a ZOOM_FACTOR-smaller region around the zoom centre and blow it back up to full size."""
         height, width = frame.shape[:2]
         crop_w = max(1, int(round(width / ZOOM_FACTOR)))
         crop_h = max(1, int(round(height / ZOOM_FACTOR)))
 
+        assert self.side_zoom_centre is not None
         centre_x, centre_y = self.side_zoom_centre
         x0 = min(max(int(centre_x) - crop_w // 2, 0), max(width - crop_w, 0))
         y0 = min(max(int(centre_y) - crop_h // 2, 0), max(height - crop_h, 0))
@@ -124,7 +131,7 @@ class CricketBallTracker:
         self._side_zoom_transform = (x0, y0, width / crop_w, height / crop_h, crop_w, crop_h)
         return zoomed
 
-    def _side_overlays_for_display(self):
+    def _side_overlays_for_display(self) -> tuple[list[FramePosition], Calibration | None]:
         """Return (positions, calibration) with coordinates mapped into display space."""
         if not self.side_zoom_active or self._side_zoom_transform is None:
             return self.side_positions, self.side_calibration
@@ -142,7 +149,7 @@ class CricketBallTracker:
             )
         return positions, calibration
 
-    def _toggle_side_zoom(self):
+    def _toggle_side_zoom(self) -> None:
         """Turn the side-on zoom off, or on around the mouse position."""
         if self.side_zoom_active:
             self.side_zoom_active = False
@@ -160,7 +167,7 @@ class CricketBallTracker:
         print(f"Side view zoom on: {ZOOM_FACTOR}x around ({self.side_zoom_centre[0]}, {self.side_zoom_centre[1]}). Press 'Z' again to zoom out.")
 
     # ---------------------- Mouse ---------------------- #
-    def top_down_mouse_callback(self, event, x, y, flags, param):
+    def top_down_mouse_callback(self, event: int, x: int, y: int, flags: int, param: typing.Any) -> None:
         """Handle a left click in the top-down window as a ball-diameter calibration
         point, ball position or seam point, depending on the active mode.
         """
@@ -171,7 +178,7 @@ class CricketBallTracker:
                 self.calibrations[-1][1].append((x, y))
                 print(f"Main diameter point added in frame {self.top_down_video.get_current_frame_number()}: ({x}, {y})")
                 if len(self.calibrations[-1][1]) == 2:
-                    self.calibrations, self.meters_per_pixel = self.calculators._calculate_meters_per_pixel(self.calibrations, self.BALL_DIAMETER_M, self.meters_per_pixel)
+                    self.calibrations, self.meters_per_pixel = self.calculators._calculate_meters_per_pixel(self.calibrations, self.BALL_DIAMETER_M, self.meters_per_pixel)  # type: ignore[misc]  # real bug: returns None when a calibration pair is unusable, but the result is unpacked
                     if len(self.calibrations) >= 2:
                         self.calibration_active = False
                         print("Main second calibration completed.")
@@ -192,7 +199,7 @@ class CricketBallTracker:
                     self.seam_angle_active = False
                     print(f"Seam angle tracking stopped for frame {self.top_down_video.get_current_frame_number()}. Angle: {self.seam_measurements[-1][1]:.2f} degrees")
 
-    def side_on_mouse_callback(self, event, x, y, flags, param):
+    def side_on_mouse_callback(self, event: int, x: int, y: int, flags: int, param: typing.Any) -> None:
         """Record the mouse position in the side-on window and handle a left click as a
         ball-diameter calibration point or ball position, in raw frame pixels.
         """
@@ -229,7 +236,7 @@ class CricketBallTracker:
                 print(f"Side View - Frame {self.side_on_video.get_current_frame_number()}: Ball at (x={x}, z={y}) - Time: {timestamp:.3f}s")
 
     # ---------------------- Data Helpers ---------------------- #
-    def _add_or_replace_point_for_frame(self, frame_no, x, y, t, is_side=False):
+    def _add_or_replace_point_for_frame(self, frame_no: int, x: float, y: float, t: float, is_side: bool = False) -> None:
         """Set a frame's ball position in the top-down or side-on list."""
         positions = self.side_positions if is_side else self.frame_positions
         for i, (f, *_rest) in enumerate(positions):
@@ -239,7 +246,7 @@ class CricketBallTracker:
         positions.append((frame_no, int(x), int(y), t))
         positions.sort(key=lambda z: z[0])
 
-    def reset(self):
+    def reset(self) -> None:
         """Clear all tracked points, seam angles, calibrations and calculated values."""
         self.frame_positions = []
         self.side_positions = []
@@ -256,7 +263,7 @@ class CricketBallTracker:
         print("Tracking data, seam angle, calibrations, and parameters reset.")
 
     # ---------------------- 3D Data ---------------------- #
-    def _build_3d_data(self):
+    def _build_3d_data(self) -> pd.DataFrame | None:
         """Return the 3D Data sheet (path extrapolated to 17 m, side-on positions,
         swing), or None if not ready.
         """
@@ -277,7 +284,7 @@ class CricketBallTracker:
             return None
 
         t0 = self.frame_positions[0][3]
-        records = []
+        records: list[list[typing.Any]] = []
         y_positions = []
         cum_dist = 0.0
 
@@ -387,8 +394,9 @@ class CricketBallTracker:
         if self.side_positions:
             x0_side, z0_side = self.side_positions[0][1], self.side_positions[0][2]
 
-        side_frame_map = {}  # frame -> (x_m_old, z_m_old) [we keep z only]
+        side_frame_map: dict[int | None, tuple[float, float]] = {}  # frame -> (x_m_old, z_m_old) [we keep z only]
         side_px_map   = {}  # frame -> (x_px, z_px)
+        z_m_old: float | None
 
         if self.side_positions and self.side_frame_for_main_frame1 is not None:
             for frame_num, x, z, t in self.side_positions:
@@ -515,7 +523,7 @@ class CricketBallTracker:
         return df
 
     # ---------------------- DataFrame ---------------------- #
-    def _build_dataframe(self):
+    def _build_dataframe(self) -> tuple[pd.DataFrame | None, float | None]:
         """Return the top-down Data sheet (positions in m, speeds) and the speed between
         the first two points in km/h, or (None, None) if not ready.
         """
@@ -533,6 +541,7 @@ class CricketBallTracker:
 
         initial_speeds = []
         n_initial_frames = min(3, len(self.frame_positions))
+        speed_ms: float | None
         for i in range(1, n_initial_frames):
             if i < len(self.frame_positions):
                 frame_num, x_px, y_px, t = self.frame_positions[i]
@@ -595,7 +604,7 @@ class CricketBallTracker:
         return pd.DataFrame(records, columns=columns), initial_speed * 3.6 if initial_speed is not None else None
 
     # ---------------------- Save to Excel ---------------------- #
-    def save_to_excel(self):
+    def save_to_excel(self) -> None:
         """Save the tracking, seam and calibration results to an Excel workbook, asking
         for its name (and folder, unless config.yml sets one).
         """
@@ -653,6 +662,7 @@ class CricketBallTracker:
                 idx = None
                 if "Frame Number" in df_3d_data.columns:
                     # use first occurrence
+                    assert self.side_frame_for_main_frame1 is not None
                     idx = df_3d_data.index[df_3d_data["Frame Number"] == (frame_num - self.side_frame_for_main_frame1 + 1)].tolist()
                     if idx:
                         y_m = df_3d_data.loc[idx[0], "Y-Position (m)"]
@@ -745,7 +755,7 @@ class CricketBallTracker:
             print(f"Error saving file: {e}")
 
     # ---------------------- Main Tracker ---------------------- #
-    def run_main_tracker(self):
+    def run_main_tracker(self) -> bool:
         """Ask for the top-down video and run its window for calibrating and clicking
         the ball and seam. Return True to go on to the side-on view, or False if the
         user quits.
@@ -771,6 +781,7 @@ class CricketBallTracker:
 
         while True:
             frame = self.top_down_video.get_current_frame()
+            assert frame is not None
             self.drawers.draw_main_trajectory(frame, self.frame_positions, self.top_down_video.current_frame, self.top_down_video.frame_width, self.seam_points, self.seam_measurements, self.calibrations)
 
             if self.calibration_active:
@@ -880,7 +891,7 @@ class CricketBallTracker:
                     self.reset()
 
     # ---------------------- Side Tracker ---------------------- #
-    def run_side_tracker(self):
+    def run_side_tracker(self) -> None:
         """Ask for the side-on video and run its window for clicking the ball and
         calibrating its diameter, saving to Excel on S, until the user quits.
         """
@@ -912,6 +923,7 @@ class CricketBallTracker:
                 frame = self._apply_side_zoom(frame)
             display_positions, display_calibration = self._side_overlays_for_display()
 
+            assert frame is not None
             self.drawers.draw_side_trajectory(frame, display_positions, self.side_on_video.current_frame, display_calibration)
 
             if self.side_calibration_active:
@@ -991,17 +1003,17 @@ class CricketBallTracker:
                     print("Side view tracking, calibration, and frame mapping reset.")
 
     # ---------------------- Main Entry ---------------------- #
-    def run_tracker(self):
+    def run_tracker(self) -> None:
         """Run the top-down window, then the side-on window unless the user quit."""
         if self.run_main_tracker():
             self.run_side_tracker()
 
-def display_excel(excel_file_path):
+def display_excel(excel_file_path: str | Path) -> None:
     """Show each sheet of an Excel file as a table in a tab of a Tkinter window."""
     try:
         # Read all sheets from Excel file
         excel_file = pd.ExcelFile(excel_file_path)
-        sheet_names = excel_file.sheet_names
+        sheet_names = typing.cast(list[str], excel_file.sheet_names)
         
         if not sheet_names:
             print(f"Error: Excel file {excel_file_path} has no sheets.")
@@ -1065,7 +1077,7 @@ def display_excel(excel_file_path):
             # Add scrollbars
             vsb = ttk.Scrollbar(sheet_frame, orient=tk.VERTICAL, command=tree.yview)
             hsb = ttk.Scrollbar(sheet_frame, orient=tk.HORIZONTAL, command=tree.xview)
-            tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+            tree.configure(yscroll=vsb.set, xscroll=hsb.set)  # type: ignore[call-overload]  # Tk accepts the abbreviations yscroll/xscroll; the typeshed stubs only list yscrollcommand/xscrollcommand
             
             # Grid layout for treeview and scrollbars
             tree.grid(row=0, column=0, sticky='nsew')
@@ -1087,7 +1099,7 @@ def display_excel(excel_file_path):
     except Exception as e:
         print(f"Error displaying Excel file: {e}")
 
-def main():
+def main() -> None:
     """Run the hand tracker on a top-down and then a side-on video."""
     tracker = CricketBallTracker()
 

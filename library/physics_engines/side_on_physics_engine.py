@@ -9,15 +9,21 @@ from __future__ import annotations
 
 import csv
 import math
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # type: ignore[import-untyped]
 
 import numpy as np
+import numpy.typing as npt
 import yaml
+
+FloatArray = npt.NDArray[np.float64]
+"""Type of the float64 numpy arrays used in this module's type annotations."""
 
 # Coordinate frames
 # - Reconstruction frame, the one the calibration was solved in: origin at the centre
@@ -76,7 +82,7 @@ class _YamlDumper(yaml.SafeDumper):
     """SafeDumper tuned for readable output. See the representer below."""
 
 
-def _represent_list(dumper, data):
+def _represent_list(dumper: _YamlDumper, data: list[Any]) -> yaml.SequenceNode:
     """Write sequences of plain scalars inline, so matrix rows stay on one line."""
     inline = all(v is None or isinstance(v, (bool, int, float)) for v in data)
     return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=inline)
@@ -92,7 +98,7 @@ class TrackedPoint:
     u: float
     v: float
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Return the frame number and pixel position as text."""
         return f"Frame: {self.frame} u: {self.u} v: {self.v}"
 
@@ -105,34 +111,34 @@ class Calibration:
     t_std: np.ndarray
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path: str | Path) -> Calibration:
         """Load a calibration from the .npz written by the calibration step."""
         d = np.load(path)
         return cls(d["K_inv"], d["R_T"], d["t_std"])
 
     @property
-    def focal_px(self):
+    def focal_px(self) -> tuple[float, float]:
         """Focal length in pixels, as (fx, fy)."""
         return 1.0 / self.K_inv[0, 0], 1.0 / self.K_inv[1, 1]
 
     @property
-    def principal_point(self):
+    def principal_point(self) -> tuple[float, float]:
         """Principal point in pixels, as (cx, cy)."""
         fx, fy = self.focal_px
         return -self.K_inv[0, 2] * fx, -self.K_inv[1, 2] * fy
 
     @property
-    def camera_centre(self):
+    def camera_centre(self) -> FloatArray:
         """Camera centre in world coordinates."""
-        return -self.R_T @ self.t_std
+        return cast(FloatArray, -self.R_T @ self.t_std)
 
     @property
-    def implied_frame_size(self):
+    def implied_frame_size(self) -> tuple[float, float]:
         """Approximate frame size this calibration was built at."""
         cx, cy = self.principal_point
         return 2.0 * cx, 2.0 * cy
 
-    def project(self, xyz):
+    def project(self, xyz: npt.ArrayLike) -> tuple[float, float]:
         """World point -> pixel. Exact inverse of the reconstruction."""
         K = np.linalg.inv(self.K_inv)
         cam = self.R_T.T @ np.asarray(xyz, float) + self.t_std
@@ -151,27 +157,27 @@ class Trajectory:
     drag: float
 
     @property
-    def x(self):
+    def x(self) -> FloatArray:
         """Lateral position in metres, positive to the bowler's right."""
         return self.world[:, 0]
 
     @property
-    def y(self):
+    def y(self) -> FloatArray:
         """Forward distance in metres, down the pitch."""
         return self.world[:, 1]
 
     @property
-    def z(self):
+    def z(self) -> FloatArray:
         """Vertical position in metres, positive downward."""
         return self.world[:, 2]
 
     @property
-    def relative_to_release(self):
+    def relative_to_release(self) -> FloatArray:
         """The world track shifted so the first tracked point is the origin."""
-        return self.world - self.world[0]
+        return cast(FloatArray, self.world - self.world[0])
 
     @property
-    def last_distance_m(self):
+    def last_distance_m(self) -> float:
         """Forward distance of the last tracked point, in metres."""
         return float(self.world[-1, 1])
 
@@ -200,7 +206,7 @@ class SwingResult:
     trajectory: Trajectory = field(repr=False)
 
     def summary(self) -> str:
-        """Render the result as a short text block."""
+        """Render the result as a short block of text."""
         return (
             f"swing at last tracked point ({self.last_point_distance_m:.2f} m): "
             f"{self.swing_at_last_point_cm:+.2f} cm\n"
@@ -225,16 +231,16 @@ class SideOnPhysicsEngine:
     be overridden per call where the signature allows it.
     """
 
-    def __init__(self, calibration, fps,
-                 drag=DRAG_COEFFICIENT,
-                 baseline_points=BASELINE_SOURCE_POINT_COUNT,
-                 projection_points=EXTRAPOLATION_SOURCE_POINT_COUNT,
-                 target_distance_m=TARGET_DISTANCE_M,
-                 ring_distances=RING_FORWARD_DISTANCES_M,
-                 cube_side_m=CUBE_SIDE_M,
-                 cube_centre_x_m=CUBE_CENTRE_X_M,
-                 cube_centre_z_m=CUBE_CENTRE_Z_M,
-                 calibration_path=None):
+    def __init__(self, calibration: Calibration, fps: float,
+                 drag: float = DRAG_COEFFICIENT,
+                 baseline_points: int = BASELINE_SOURCE_POINT_COUNT,
+                 projection_points: int = EXTRAPOLATION_SOURCE_POINT_COUNT,
+                 target_distance_m: float = TARGET_DISTANCE_M,
+                 ring_distances: Iterable[float] = RING_FORWARD_DISTANCES_M,
+                 cube_side_m: float = CUBE_SIDE_M,
+                 cube_centre_x_m: float = CUBE_CENTRE_X_M,
+                 cube_centre_z_m: float = CUBE_CENTRE_Z_M,
+                 calibration_path: str | Path | None = None) -> None:
         """Bind a calibration and a frame rate to the engine."""
         self.calibration = calibration
         self.fps = float(fps)
@@ -249,20 +255,21 @@ class SideOnPhysicsEngine:
         self.calibration_path = None if calibration_path is None else str(calibration_path)
 
     @classmethod
-    def from_calibration_file(cls, path, fps, **kwargs):
+    def from_calibration_file(cls, path: str | Path, fps: float, **kwargs: Any) -> SideOnPhysicsEngine:
         """Build an engine directly from a calibration .npz path."""
         kwargs.setdefault("calibration_path", path)
         return cls(Calibration.load(path), fps, **kwargs)
 
     @staticmethod
-    def forward_distance(t, speed_m_s, drag=DRAG_COEFFICIENT):
+    def forward_distance(t: float, speed_m_s: float, drag: float = DRAG_COEFFICIENT) -> float:
         """Distance travelled at time t under quadratic drag."""
         if drag <= 0:
             return speed_m_s * t
         return math.log(1.0 + drag * speed_m_s * t) / drag
 
-    def reconstruct_trajectory(self, points, speed_km_h, fps=None,
-                               drag=None) -> Trajectory:
+    def reconstruct_trajectory(self, points: Sequence[TrackedPoint], speed_km_h: float,
+                               fps: float | None = None,
+                               drag: float | None = None) -> Trajectory:
         """
         Pixel track -> 3D world track, at the given delivery speed in km/h.
 
@@ -292,7 +299,7 @@ class SideOnPhysicsEngine:
                           float(fps), float(speed_km_h), float(drag))
 
     @staticmethod
-    def ball_coordinates(trajectory: Trajectory, origin="cubes") -> np.ndarray:
+    def ball_coordinates(trajectory: Trajectory, origin: str = "cubes") -> np.ndarray:
         """
         Ball position in metres, as an (N, 3) array of X, Y, Z.
 
@@ -313,7 +320,7 @@ class SideOnPhysicsEngine:
         raise ValueError(f"origin must be 'cubes' or 'release', got {origin!r}")
 
     @property
-    def output_frame_origin(self):
+    def output_frame_origin(self) -> FloatArray:
         """
         The reported frame's origin, expressed in reconstruction coordinates.
 
@@ -327,7 +334,7 @@ class SideOnPhysicsEngine:
                          0.0,
                          self.cube_centre_z_m + half])
 
-    def to_output_frame(self, xyz):
+    def to_output_frame(self, xyz: npt.ArrayLike) -> FloatArray:
         """
         Reconstruction coordinates -> reported coordinates.
 
@@ -349,13 +356,14 @@ class SideOnPhysicsEngine:
         return out.reshape(np.shape(xyz))
 
     @staticmethod
-    def _fit_line(y, x):
+    def _fit_line(y: FloatArray, x: FloatArray) -> tuple[float, float, float]:
         """Least-squares line x(y), as (slope, intercept, residual RMS in cm)."""
         slope, intercept = np.polyfit(y, x, 1)
         rms_cm = float(np.std(x - (intercept + slope * y)) * 100.0)
         return float(slope), float(intercept), rms_cm
 
-    def fit_swingless_baseline(self, trajectory: Trajectory, n_points=None):
+    def fit_swingless_baseline(self, trajectory: Trajectory,
+                               n_points: int | None = None) -> tuple[float, float, float]:
         """Straight line through the first n_points - the no-swing path."""
         n_points = self.baseline_points if n_points is None else n_points
         n = min(n_points, len(trajectory.world))
@@ -363,7 +371,8 @@ class SideOnPhysicsEngine:
             raise ValueError(f"need at least 3 points for a baseline, got {n}")
         return self._fit_line(trajectory.y[:n], trajectory.x[:n])
 
-    def fit_projection(self, trajectory: Trajectory, n_points=None):
+    def fit_projection(self, trajectory: Trajectory,
+                       n_points: int | None = None) -> tuple[float, float, float]:
         """Straight line through the final n_points."""
         n_points = self.projection_points if n_points is None else n_points
         n = min(n_points, len(trajectory.world))
@@ -372,18 +381,18 @@ class SideOnPhysicsEngine:
         return self._fit_line(trajectory.y[-n:], trajectory.x[-n:])
 
     @staticmethod
-    def line_x(y, slope, intercept):
+    def line_x(y: npt.ArrayLike, slope: float, intercept: float) -> FloatArray | np.float64:
         """Lateral position of a fitted line at forward distance y."""
         return intercept + slope * np.asarray(y, dtype=float)
 
     @classmethod
-    def _gap_cm(cls, y, b, p):
+    def _gap_cm(cls, y: float, b: Sequence[float], p: Sequence[float]) -> float:
         """Signed gap in cm between the projection and the baseline at y."""
         return float((cls.line_x(y, p[0], p[1]) - cls.line_x(y, b[0], b[1])) * 100.0)
 
     def swing_at_last_tracked_point(self, trajectory: Trajectory,
-                                    baseline_points=None,
-                                    projection_points=None) -> float:
+                                    baseline_points: int | None = None,
+                                    projection_points: int | None = None) -> float:
         """
         Swing in cm at the last tracked point: the gap between the swingless
         baseline and the projection line, both evaluated there.
@@ -397,9 +406,9 @@ class SideOnPhysicsEngine:
         return self._gap_cm(trajectory.last_distance_m, b, p)
 
     def swing_at_17m(self, trajectory: Trajectory,
-                     baseline_points=None,
-                     projection_points=None,
-                     target_distance_m=None) -> float:
+                     baseline_points: int | None = None,
+                     projection_points: int | None = None,
+                     target_distance_m: float | None = None) -> float:
         """
         Swing in cm at TARGET_DISTANCE_M: the same gap, extended to 17 m.
 
@@ -414,9 +423,10 @@ class SideOnPhysicsEngine:
         p = self.fit_projection(trajectory, projection_points)
         return self._gap_cm(target_distance_m, b, p)
 
-    def analyse(self, points, speed_km_h, fps=None, drag=None,
-                baseline_points=None, projection_points=None,
-                target_distance_m=None) -> SwingResult:
+    def analyse(self, points: Sequence[TrackedPoint], speed_km_h: float,
+                fps: float | None = None, drag: float | None = None,
+                baseline_points: int | None = None, projection_points: int | None = None,
+                target_distance_m: float | None = None) -> SwingResult:
         """
         Reconstruct the delivery and return both swing values plus diagnostics.
 
@@ -453,8 +463,8 @@ class SideOnPhysicsEngine:
             trajectory=traj,
         )
 
-    def ring_corners(self, forward_distance_m, side=None,
-                     centre_x=None, centre_z=None):
+    def ring_corners(self, forward_distance_m: float, side: float | None = None,
+                     centre_x: float | None = None, centre_z: float | None = None) -> FloatArray:
         """Four corners of one calibration ring, in world coordinates."""
         side = self.cube_side_m if side is None else side
         centre_x = self.cube_centre_x_m if centre_x is None else centre_x
@@ -467,7 +477,8 @@ class SideOnPhysicsEngine:
             [centre_x - h, forward_distance_m, centre_z + h],
         ])
 
-    def cube_edges(self, distances=None, **kw):
+    def cube_edges(self, distances: Sequence[float] | None = None,
+                   **kw: float | None) -> list[tuple[FloatArray, FloatArray]]:
         """Line segments for the cube wireframe: each ring, plus the rails between."""
         distances = self.ring_distances if distances is None else distances
         rings = [self.ring_corners(d, **kw) for d in distances]
@@ -481,7 +492,7 @@ class SideOnPhysicsEngine:
         return segments
 
     @classmethod
-    def _plain(cls, value):
+    def _plain(cls, value: Any) -> Any:
         """Convert numpy scalars and arrays to plain Python types, recursively."""
         if isinstance(value, dict):
             return {k: cls._plain(v) for k, v in value.items()}
@@ -497,7 +508,7 @@ class SideOnPhysicsEngine:
             return float(value)
         return value
 
-    def _analysis_mapping(self, result: SwingResult, points_csv_name) -> dict:
+    def _analysis_mapping(self, result: SwingResult, points_csv_name: str) -> dict[str, Any]:
         """
         Assemble everything that is not per-point data into one plain mapping.
 
@@ -511,11 +522,11 @@ class SideOnPhysicsEngine:
         cal = self.calibration
         origin = self.output_frame_origin
 
-        def reported_intercept(slope, intercept):
+        def reported_intercept(slope: float, intercept: float) -> float:
             """Move a fitted line x(y) into the reported frame."""
-            return intercept - origin[0] + slope * origin[1]
+            return cast(float, intercept - origin[0] + slope * origin[1])
 
-        return self._plain({
+        return cast(dict[str, Any], self._plain({
             "written_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "points_csv": points_csv_name,
             "coordinate_frame": {
@@ -581,10 +592,11 @@ class SideOnPhysicsEngine:
                 "cube_centre_x_m": self.cube_centre_x_m,
                 "cube_centre_z_m": self.cube_centre_z_m,
             },
-        })
+        }))
 
-    def save_data_to_files(self, result: SwingResult, save_directory,
-                           points=None, prefix="") -> dict:
+    def save_data_to_files(self, result: SwingResult, save_directory: str | Path,
+                           points: Sequence[TrackedPoint] | None = None,
+                           prefix: str = "") -> dict[str, str]:
         """
         Write the whole analysis to save_directory, creating it if needed.
 
@@ -634,7 +646,7 @@ class SideOnPhysicsEngine:
 
         return {"points_csv": str(csv_path), "analysis_yaml": str(yaml_path)}
 
-    def plot_swing(self, result: SwingResult, save_path="", show=False):
+    def plot_swing(self, result: SwingResult, save_path: str = "", show: bool = False) -> str:
         """Trajectory, baseline, projection, and both swing values as measured gaps."""
         import matplotlib.pyplot as plt
 
@@ -689,8 +701,11 @@ class SideOnPhysicsEngine:
             plt.close(fig)
         return save_path
 
-    def plot_trajectory_3d(self, result: SwingResult, show=True, save_path=None,
-                           distances=None, show_baseline=True, elev=18, azim=-70):
+    def plot_trajectory_3d(self, result: SwingResult, show: bool = True,
+                           save_path: str | None = None,
+                           distances: Sequence[float] | None = None,
+                           show_baseline: bool = True, elev: float = 18,
+                           azim: float = -70) -> str | None:
         """
         Full 3D trajectory with the calibration cubes drawn as reference.
 

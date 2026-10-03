@@ -2,6 +2,8 @@
 one frame, and the camera is solved from them by DLT and saved as an .npz file.
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import numpy as np
@@ -10,6 +12,7 @@ from tkinter import Tk, filedialog
 import os
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from library import paths
 from library.helpers import Coord
@@ -105,7 +108,7 @@ def load_calibration(path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     data = np.load(path)
     return data["K_inv"], data["R_T"], data["t_std"]
 
-def choose_file_path():
+def choose_file_path() -> str | None:
     """Ask the user to pick a file and return its path, or None if cancelled."""
     root = Tk()
     root.withdraw()
@@ -120,7 +123,7 @@ def choose_file_path():
     
     return absolute_path
 
-def main(video_path: str):
+def main(video_path: str) -> None:
     """Ask which frame of the video to use, let the user click every ring corner on it,
     then solve the camera and save the calibration.
     """
@@ -220,7 +223,7 @@ def main(video_path: str):
         zoom_centre = mouse_pos
         print(f"Zoom on: {ZOOM_FACTOR}x around ({zoom_centre[0]}, {zoom_centre[1]}). Press 'z' again to zoom out.")
 
-    def redraw():
+    def redraw() -> None:
         """Redraw the frame (zoomed if on), the numbered corners and the title."""
         # Zoom is applied to the raw frame first, then markers are drawn on top at normal
         # size so they stay readable at any ZOOM_FACTOR.
@@ -234,7 +237,7 @@ def main(video_path: str):
         cv2.setWindowTitle(window_name, f"Next: {next_label()}  |  Zoom: {zoom_status}")
         cv2.imshow(window_name, img)
 
-    def on_mouse(event, x, y, flags, param):
+    def on_mouse(event: int, x: int, y: int, flags: int, param: Any) -> None:
         """Track the mouse and add a corner, in raw frame pixels, on each left click."""
         nonlocal mouse_pos
         # Everything below works in raw frame coordinates, regardless of zoom state.

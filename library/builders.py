@@ -2,13 +2,37 @@
 old Excel export. Not used by any program.
 """
 
+from __future__ import annotations
+
 import math
+from typing import TYPE_CHECKING, Any
 import pandas as pd
 import numpy as np
 
+if TYPE_CHECKING:
+    from library.calculators import Calculators
+    from library.helpers import Calibration, FramePosition
+
 class Builder:
     """Mixin that builds the 3D Data table for the Excel export."""
-    def _build_3d_data(self, frame_positions, meters_per_pixel, initial_velocity, deceleration):
+    # Attributes of the class this mixin is mixed into, which the method below reads (and,
+    # for side_calibration and side_focal_length_px, also writes). meters_per_pixel and
+    # initial_velocity are used as numbers without a None check, so they are declared as float.
+    fps: float
+    initial_velocity: float
+    deceleration: float | None
+    calculators: Calculators
+    frame_positions: list[FramePosition]
+    frame_height: int
+    meters_per_pixel: float
+    side_frame_for_main_frame1: int | None
+    total_frames_side: int
+    side_calibration: Calibration | None
+    side_focal_length_px: float | None
+    side_positions: list[FramePosition]
+    BALL_DIAMETER_M: float
+
+    def _build_3d_data(self, frame_positions: list[FramePosition], meters_per_pixel: float | None, initial_velocity: float | None, deceleration: float | None) -> pd.DataFrame | None:
         """Return the 3D Data table, extended to 17 m, or None if it cannot be built."""
         FX = 2877.72
         FZ = 2877.72
@@ -24,7 +48,7 @@ class Builder:
             return None
 
         t0 = frame_positions[0][3]
-        records = []
+        records: list[list[Any]] = []
         y_positions = []
         cum_dist = 0.0
 
@@ -134,7 +158,7 @@ class Builder:
         if self.side_positions:
             x0_side, z0_side = self.side_positions[0][1], self.side_positions[0][2]
 
-        side_frame_map = {}  # frame -> (x_m_old, z_m_old) [we keep z only]
+        side_frame_map: dict[int | None, tuple[float | None, float | None]] = {}  # frame -> (x_m_old, z_m_old) [we keep z only]
         side_px_map   = {}  # frame -> (x_px, z_px)
 
         if self.side_positions and self.side_frame_for_main_frame1 is not None:
@@ -146,7 +170,7 @@ class Builder:
                 if self.side_focal_length_px and y_m > 0:
                     mpp = y_m / self.side_focal_length_px
                     x_m_old = ((x - x0_side) * mpp) / FX * 175 if x0_side is not None else (x * mpp) / FX * 175
-                    z_m_old = ((z - z0_side) * mpp) / FZ * 175 if z0_side is not None else (z * mpp) / FZ * 175
+                    z_m_old: float | None = ((z - z0_side) * mpp) / FZ * 175 if z0_side is not None else (z * mpp) / FZ * 175
                 else:
                     x_m_old = (x - x0_side) * 175 if x0_side is not None else x * 175
                     z_m_old = (z - z0_side) * 175 if z0_side is not None else z * 175
@@ -163,7 +187,7 @@ class Builder:
                 m_per_px_first = self.BALL_DIAMETER_M / px_diam
 
         # Side X/Z pixels by adjusted frame (1-based to match records)
-        side_px_by_adjframe = {}
+        side_px_by_adjframe: dict[int, tuple[int | None, int | None]] = {}
         if self.side_positions and self.side_frame_for_main_frame1 is not None:
             for frame_num, x, z, _ in self.side_positions:
                 adj_idx = frame_num - self.side_frame_for_main_frame1 + 1

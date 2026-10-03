@@ -2,8 +2,15 @@
 video frames.
 """
 
+from __future__ import annotations
+
 import cv2
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cv2.typing import MatLike
+    from library.helpers import Calibration, FramePosition
 
 class Color(Enum):
     """Named colours as OpenCV BGR tuples."""
@@ -26,14 +33,14 @@ class Color(Enum):
 
 class Drawers:
     """Drawing helpers for the tracker windows."""
-    def draw_text(self, frame, text, position, font_scale=1.2, thickness=3):
+    def draw_text(self, frame: MatLike, text: str, position: tuple[int, int], font_scale: float = 1.2, thickness: int = 3) -> None:
         """Draw black text with a white drop shadow at a position on the frame."""
         font = cv2.FONT_HERSHEY_SIMPLEX
         x, y = position
         cv2.putText(frame, text, (x + 2, y + 2), font, font_scale, Color.WHITE.value, thickness + 2, cv2.LINE_AA)
         cv2.putText(frame, text, (x, y), font, font_scale, Color.BLACK.value, thickness, cv2.LINE_AA)
 
-    def draw_main_trajectory(self, frame, frame_positions, current_frame, frame_width, seam_points, seam_measurements, calibrations):
+    def draw_main_trajectory(self, frame: MatLike, frame_positions: list[FramePosition], current_frame: int, frame_width: int, seam_points: list[tuple[int, int]], seam_measurements: list[tuple[int, float]], calibrations: list[Calibration]) -> None:
         """Draw the top-down overlays: the tracked path, seam points and line, the
         current frame's seam angle and the calibration points.
         """
@@ -71,7 +78,7 @@ class Drawers:
             if len(points) == 2:
                 cv2.line(frame, points[0], points[1], (0, 255, 255), 2)
         
-    def draw_side_trajectory(self, frame, side_positions, current_frame, side_calibration):
+    def draw_side_trajectory(self, frame: MatLike, side_positions: list[FramePosition], current_frame: int, side_calibration: Calibration | None) -> None:
         """Draw the side-on overlays: the tracked path and the calibration points."""
         if len(side_positions) > 1:
             for i in range(1, len(side_positions)):

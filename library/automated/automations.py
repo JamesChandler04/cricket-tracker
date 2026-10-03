@@ -5,12 +5,14 @@ finder.
 Only the old programs use it; the current program has the ball clicked by hand.
 """
 
+from __future__ import annotations
+
 import cv2
 import numpy as np
 import os
 import math
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from library.helpers import TopDownBallData, TopDownBallDataPoint, SideOnBallData, SideOnBallDataPoint, Coord, Video
 import sys
 from enum import Enum
@@ -20,6 +22,9 @@ import multiprocessing as mp
 
 from library import log_bridge # Lets print statements to be redirected to console in window.
 from library import paths
+
+if TYPE_CHECKING:
+    from cv2.typing import MatLike
 
 # Output folders for debug and tracking images
 top_down_tracking_folder = str(paths.TOP_DOWN_TRACKING_DIR)
@@ -97,7 +102,7 @@ def _load_bounding_box(view: str) -> Optional[tuple[int, int, int, int]]:
     return int(xs), int(ys), int(xe), int(ye)
 
 
-def _apply_bounding_box(frame, background_frame, bbox):
+def _apply_bounding_box(frame: MatLike, background_frame: MatLike, bbox: tuple[int, int, int, int]) -> tuple[MatLike, MatLike, int, int]:
     """
     Crop both frames to the bounding box region.
     Returns (cropped_frame, cropped_bg, x_offset, y_offset).
@@ -154,9 +159,11 @@ class TopDownBallFinder:
             current_frame = video.get_current_frame()
             ball_data = self.find_ball(current_frame, background_frame)
             if ball_data:
+                assert current_frame is not None
                 ball_data = self.find_seam(ball_data, current_frame)
             if ball_data:
                 ball_data_points.append(TopDownBallDataPoint(frame_number=video.current_frame, data=ball_data))
+                assert current_frame is not None
                 cv2.imwrite(f"{top_down_tracking_folder}/frame_{video.current_frame:04d}.jpg", current_frame)
                 ball_position = BallPosition.IN_FRAME
             else:
@@ -171,7 +178,7 @@ class TopDownBallFinder:
 
         return ball_data_points
 
-    def find_ball(self, frame, background_frame) -> Optional[TopDownBallData]:
+    def find_ball(self, frame: MatLike | None, background_frame: MatLike | None) -> Optional[TopDownBallData]:
         """Find the ball by motion against the background frame, red colour and circle
         shape, and return its box and centre in px (seam fields set to -1), or None.
         """
@@ -325,7 +332,7 @@ class TopDownBallFinder:
             seam_angle=-1.0
         )
 
-    def find_seam(self, ball_data: TopDownBallData, frame) -> Optional[TopDownBallData]:
+    def find_seam(self, ball_data: TopDownBallData, frame: MatLike) -> Optional[TopDownBallData]:
         """Return the ball data with the seam ends and angle in degrees set from the
         longest white line in the ball, or with the angle -1 if there is none.
         """
@@ -476,6 +483,7 @@ class SideOnBallFinder:
             ball_data = self.find_ball(current_frame, background_frame)
             if ball_data:
                 ball_data_points.append(SideOnBallDataPoint(frame_number=video.current_frame, data=ball_data))
+                assert current_frame is not None
                 cv2.imwrite(f"{side_on_tracking_folder}/frame_{video.current_frame:04d}.jpg", current_frame)
                 ball_position = BallPosition.IN_FRAME
             else:
@@ -486,7 +494,7 @@ class SideOnBallFinder:
             #print(f"Side On Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
         return ball_data_points
 
-    def find_ball(self, current_frame, background_frame) -> Optional[SideOnBallData]:
+    def find_ball(self, current_frame: MatLike | None, background_frame: MatLike | None) -> Optional[SideOnBallData]:
         """Find the ball by motion against the background frame, red colour and circle
         shape, and return its box and centre in px, or None.
         """

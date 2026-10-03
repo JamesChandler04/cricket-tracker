@@ -9,6 +9,7 @@ import math
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
@@ -16,31 +17,6 @@ import numpy as np
 from library.detect_seam_angle_file import (BALL_IMAGE_FOLDER, DEFAULT_SAVE_DIR, BallImage,
                                             SeamAngleDetector, SeamMeasurement, fold_line_angle,
                                             load_ball_images, save_seam_measurement)
-
-# The seam is found from its stitching, which shows as a band of parallel
-# bright stripes across the dark red leather. If the stripes slope at m pixels
-# down per pixel across, every column of pixels through the ball holds the
-# same pattern of bright and dark bands, each column shifted m pixels further
-# down than the one before. So for each angle tried, every column is slid back
-# up by the slope and the columns are added together. At the stripes' own
-# angle the bright bands line up and the sum has its sharpest peaks.
-#
-# This is done twice. The search finds the seam within SEARCH_RANGE_DEG of the
-# direction of travel. The refine passes then turn the seam level and look
-# again close to it. With the seam level, the columns used cross a curved
-# stitching band symmetrically, so the answer is the angle of the line joining
-# its two ends. The refine passes also look at the band at a coarser scale:
-# motion blur smears a curved band into a thin bright streak along the
-# direction of travel, which at the finest scale lines up better than the
-# stitching does and pulls the answer towards the direction of travel.
-#
-# Inside the ball, motion blur only spreads each column's bands evenly about
-# their right place. Near the left and right edges the stitching runs out on
-# one side, so only the middle columns are used.
-#
-# The seam is looked for on every ball image, and the seam angle given back is
-# the average of the angles found, with a warning when they differ by more than
-# MAX_SPREAD_DEG.
 
 SEARCH_RANGE_DEG = 45.0
 """Range of angles searched either side of the direction of travel, in degrees."""
@@ -372,7 +348,7 @@ def _high_pass_down_columns(image: np.ndarray, inside: np.ndarray, sigma: float)
     """image minus its smooth shading down each column, using only pixels inside the ball."""
     weight = inside.astype(np.float64)
     smooth = _smooth_down_columns(image * weight, sigma) / np.maximum(_smooth_down_columns(weight, sigma), 1e-6)
-    return image - smooth
+    return cast(np.ndarray, image - smooth)
 
 
 def _band_offset(image: np.ndarray, used: np.ndarray, across: np.ndarray, top: np.ndarray,
