@@ -1,4 +1,4 @@
-.PHONY: venv install
+.PHONY: venv install docs-install docs docs-serve
 
 VENV=.venv\Scripts
 
@@ -16,6 +16,15 @@ run-gui:
 
 test:
 	$(VENV)\activate && pip list
+
+docs-install:
+	$(VENV)\python -m pip install -r requirements-docs.txt
+
+docs:
+	$(VENV)\python -m mkdocs build
+
+docs-serve:
+	$(VENV)\python -m mkdocs serve
 
 clean:
 	del /Q .venv
