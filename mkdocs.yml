@@ -1,0 +1,90 @@
+site_name: Cricket Ball Tracker
+site_description: Calculating the speed, swing and seam angle of a cricket delivery from two cameras.
+site_author: James Chandler
+
+theme:
+  name: material
+  font: false # use system font
+  features:
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.highlight
+    - content.code.copy
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+  - offline
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            members_order: source
+            filters: [] # show private helper functions
+            merge_init_into_class: true
+            show_signature_annotations: true
+            separate_signature: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - toc:
+      permalink: true
+
+extra:
+  polyfills:
+    - javascripts/iframe-worker-shim.js
+
+watch: # auto reload when code is updated
+  - library
+  - main
+
+nav:
+  - Home: index.md
+  - Code reference:
+      - Current program:
+          - GUI_new_cricket_ball_tracker.py: reference/main/GUI_new_cricket_ball_tracker.md
+      - Tracking and seam angle:
+          - manual_tracker.py: reference/library/manual_tracker.md
+          - detect_seam_angle_file.py: reference/library/detect_seam_angle_file.md
+          - automatic_seam_angle.py: reference/library/automated/automatic_seam_angle.md
+      - Physics and calibration:
+          - top_down_physics_engine.py: reference/library/physics_engines/top_down_physics_engine.md
+          - side_on_physics_engine.py: reference/library/physics_engines/side_on_physics_engine.md
+          - camera_calibration.py: reference/library/camera_calibration.md
+      - Results and support:
+          - results.py: reference/library/results.md
+          - paths.py: reference/library/paths.md
+          - log_bridge.py: reference/library/log_bridge.md
+          - helpers.py: reference/library/helpers.md
+          - display.py: reference/library/display.md
+          - drawers.py: reference/library/drawers.md
+          - calculators.py: reference/library/calculators.md
+          - checkers.py: reference/library/checkers.md
+      - Utility scripts:
+          - frame_save.py: reference/frame_save.md
+          - generate_seam_training_data.py: reference/generate_seam_training_data.md
+          - evaluate_seam_detector.py: reference/evaluate_seam_detector.md
+          - make_speed_plot.py: reference/report_data/make_speed_plot.md
+          - side_on_phys_demo.py: reference/main/side_on_phys_demo.md
+          - viewer.py: reference/main/viewer.md
+      - Old code:
+          - new_cricket_ball_tracker.py: reference/main/new_cricket_ball_tracker.md
+          - cricket_ball_tracker.py: reference/main/cricket_ball_tracker.md
+          - automated_cricket_ball_tracker.py: reference/main/automated_cricket_ball_tracker.md
+          - automations.py: reference/library/automated/automations.md
+          - builders.py: reference/library/builders.md
+          - exporters.py: reference/library/exporters.md

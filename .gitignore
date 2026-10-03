@@ -8,3 +8,6 @@
 *.yaml
 __pycache__
 .todo
+site/
+!docs/**/*.png
+!docs/**/*.jpg
