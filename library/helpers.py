@@ -6,6 +6,7 @@ from enum import Enum
 from dataclasses import dataclass
 import math
 import cv2
+import numpy as np
 
 class Key(Enum):
     """Key codes from cv2.waitKey for the keys the OpenCV windows use."""
@@ -135,7 +136,7 @@ class Video:
 
         self.current_frame = 0
         self.rotation = 0
-        self._cached_frame = None
+        self._cached_frame: np.ndarray | None = None
         self._cached_frame_index = -1
 
     def _get_frame_data(self):

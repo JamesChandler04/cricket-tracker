@@ -181,7 +181,7 @@ class BoundingBoxDialog(QDialog):
 
         # Image area
         self.img_label = SelectableImageLabel()
-        self.img_label.setAlignment(Qt.AlignCenter)
+        self.img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.img_label.setMinimumHeight(480)
         self.img_label.setText("No image loaded")
         self.img_label.setStyleSheet(
@@ -200,7 +200,9 @@ class BoundingBoxDialog(QDialog):
         # Dialog buttons
         btn_box = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btn_box.button(QDialogButtonBox.Ok).setText("Confirm")
+        ok_button = btn_box.button(QDialogButtonBox.Ok)
+        if ok_button is not None:
+            ok_button.setText("Confirm")
         btn_box.accepted.connect(self._confirm)
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
@@ -415,11 +417,11 @@ class FrameViewer(QWidget):
         font.setPointSize(11)
         font.setBold(True)
         lbl.setFont(font)
-        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl)
 
         self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setMinimumSize(600, 340)
         self.image_label.setStyleSheet(
             "background-color: #1a1a1a; border: 1px solid #555;")
@@ -434,7 +436,7 @@ class FrameViewer(QWidget):
         self.prev_btn.clicked.connect(self.prev_frame)
 
         self.counter_label = QLabel("-")
-        self.counter_label.setAlignment(Qt.AlignCenter)
+        self.counter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.counter_label.setMinimumWidth(100)
 
         self.next_btn = QPushButton("Next  ▶")

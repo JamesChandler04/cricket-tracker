@@ -8,6 +8,7 @@ import numpy as np
 import cv2
 from tkinter import Tk, filedialog
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
 from library import paths
@@ -37,24 +38,23 @@ CORNER_LABELS = ["top_left", "top_right", "bottom_right", "bottom_left"]
 
 
 def resection_camera(
-    ring_forward_distances_m: list[float],
-    ring_corners_px: list[tuple[Coord, Coord, Coord, Coord]],
+    ring_forward_distances_m: Sequence[float],
+    ring_corners_px: Sequence[Sequence[Coord]],
     tunnel_half_width_m: float = 1.5,
     tunnel_half_height_m: float = 1.5,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    '''
-    Recovers the camera's full intrinsics + pose from the ring corners.
+    """Recovers the camera's full intrinsics + pose from the ring corners.
     Returns (K_inv, R_T, t_std) - used directly by pixel_to_xyz.
-    '''
-    object_points = []
+    """
+    corner_list: list[tuple[float, float, float]] = []
     for depth in ring_forward_distances_m:
-        object_points += [
+        corner_list += [
             (-tunnel_half_width_m, depth, -tunnel_half_height_m),  # top_left
             (tunnel_half_width_m, depth, -tunnel_half_height_m),   # top_right
             (tunnel_half_width_m, depth, tunnel_half_height_m),    # bottom_right
             (-tunnel_half_width_m, depth, tunnel_half_height_m),   # bottom_left
         ]
-    object_points = np.array(object_points, dtype=np.float64)
+    object_points = np.array(corner_list, dtype=np.float64)
 
     image_points = np.array(
         [(c.x, c.y) for corners in ring_corners_px for c in corners], dtype=np.float64
@@ -63,11 +63,11 @@ def resection_camera(
     if len(object_points) < 6:
         raise ValueError(f"Need at least 6 corner correspondences (2+ full rings), got {len(object_points)}.")
 
-    A = []
+    rows = []
     for (X, Y, Z), (u, v) in zip(object_points, image_points):
-        A.append([X, Y, Z, 1, 0, 0, 0, 0, -u*X, -u*Y, -u*Z, -u])
-        A.append([0, 0, 0, 0, X, Y, Z, 1, -v*X, -v*Y, -v*Z, -v])
-    A = np.array(A)
+        rows.append([X, Y, Z, 1, 0, 0, 0, 0, -u*X, -u*Y, -u*Z, -u])
+        rows.append([0, 0, 0, 0, X, Y, Z, 1, -v*X, -v*Y, -v*Z, -v])
+    A = np.array(rows)
     _, _, Vt = np.linalg.svd(A)
     P = Vt[-1].reshape(3, 4)
 
@@ -124,12 +124,12 @@ def main(video_path: str):
     """Ask which frame of the video to use, let the user click every ring corner on it,
     then solve the camera and save the calibration.
     """
-    frame = int(input("What frame do you want to calibrate on?\n"))
+    frame_number = int(input("What frame do you want to calibrate on?\n"))
     num_rings = len(RING_FORWARD_DISTANCES_M)
     num_points_needed = num_rings * 4
 
     cap = cv2.VideoCapture(video_path)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
     ok, frame = cap.read()
     cap.release()
     if not ok:
@@ -161,6 +161,7 @@ def main(video_path: str):
         crop_w = max(1, int(round(frame_w / ZOOM_FACTOR)))
         crop_h = max(1, int(round(frame_h / ZOOM_FACTOR)))
 
+        assert zoom_centre is not None  # only called while zoom is on
         centre_x, centre_y = zoom_centre
         x0 = min(max(int(centre_x) - crop_w // 2, 0), max(frame_w - crop_w, 0))
         y0 = min(max(int(centre_y) - crop_h // 2, 0), max(frame_h - crop_h, 0))

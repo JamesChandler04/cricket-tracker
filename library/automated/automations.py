@@ -329,6 +329,7 @@ class TopDownBallFinder:
         """Return the ball data with the seam ends and angle in degrees set from the
         longest white line in the ball, or with the angle -1 if there is none.
         """
+        assert ball_data.top_left is not None and ball_data.bottom_right is not None
         x0 = max(0, ball_data.top_left.x)
         y0 = max(0, ball_data.top_left.y)
         x1 = min(frame.shape[1], ball_data.bottom_right.x)
@@ -376,6 +377,7 @@ class TopDownBallFinder:
         except Exception:
             centre_full = Coord(x=(x0 + x1) // 2, y=(y0 + y1) // 2)
             radius_full = int(min((x1 - x0), (y1 - y0)) / 2)
+        assert centre_full is not None
 
         cx = centre_full.x - x0
         cy = centre_full.y - y0
@@ -418,6 +420,7 @@ class TopDownBallFinder:
             except Exception:
                 centre = centre_full
                 radius = radius_full
+            assert centre is not None
 
             mask = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
             cv2.circle(mask, (centre.x - x0, centre.y - y0), radius, 255, -1)
@@ -530,7 +533,7 @@ class SideOnBallFinder:
         motion_mask = cv2.dilate(motion_mask, kernel_small, iterations=1)
 
         # Colour mask
-        color_mask = np.zeros((proc_h, proc_w), dtype=np.uint8)
+        color_mask: np.ndarray = np.zeros((proc_h, proc_w), dtype=np.uint8)
         for lower, upper in SIDE_ON_BALL_COLOR_RANGES:
             color_mask = cv2.bitwise_or(color_mask, cv2.inRange(hsv, lower, upper))
 

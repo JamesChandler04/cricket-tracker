@@ -524,27 +524,27 @@ class SideOnPhysicsEngine:
         and the resulting quadratic-based and linear-based swing curves.
         '''
         actual = np.array(self.pixel_to_xyz(side_on_points, fps, initial_speed_km_h, K_inv, R_T, t_std, drag_coefficient))
-        delivery_quad, delivery_lin = self.get_extrapolated_trajectory(
+        delivery_quad_list, delivery_lin_list = self.get_extrapolated_trajectory(
             side_on_points, fps, initial_speed_km_h, K_inv, R_T, t_std, drag_coefficient, max_forward_distance_m, linear_fit_points
         )
-        delivery_quad, delivery_lin = np.array(delivery_quad), np.array(delivery_lin)
+        delivery_quad, delivery_lin = np.array(delivery_quad_list), np.array(delivery_lin_list)
 
         reference_points = self._build_reference_points()
         ref_K_inv, ref_R_T, ref_t_std = self._load_reference_calibration()
         reference_actual = np.array(self.pixel_to_xyz(
             reference_points, REFERENCE_FPS, REFERENCE_INITIAL_SPEED_KMH, ref_K_inv, ref_R_T, ref_t_std, REFERENCE_DRAG_COEFFICIENT
         ))
-        ref_quad, ref_lin = self.get_extrapolated_trajectory(
+        ref_quad_list, ref_lin_list = self.get_extrapolated_trajectory(
             reference_points, REFERENCE_FPS, REFERENCE_INITIAL_SPEED_KMH, ref_K_inv, ref_R_T, ref_t_std,
             REFERENCE_DRAG_COEFFICIENT, max_forward_distance_m, linear_fit_points,
         )
-        ref_quad, ref_lin = np.array(ref_quad), np.array(ref_lin)
+        ref_quad, ref_lin = np.array(ref_quad_list), np.array(ref_lin_list)
 
-        quad_swing, lin_swing = self.calculate_relative_swing_bestfit(
+        quad_swing_list, lin_swing_list = self.calculate_relative_swing_bestfit(
             side_on_points, fps, initial_speed_km_h, K_inv, R_T, t_std,
             drag_coefficient, max_forward_distance_m, linear_fit_points,
         )
-        quad_swing, lin_swing = np.array(quad_swing), np.array(lin_swing)
+        quad_swing, lin_swing = np.array(quad_swing_list), np.array(lin_swing_list)
 
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
