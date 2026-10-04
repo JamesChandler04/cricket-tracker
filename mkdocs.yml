@@ -81,6 +81,10 @@ nav:
           - make_speed_plot.py: reference/report_data/make_speed_plot.md
           - side_on_phys_demo.py: reference/main/side_on_phys_demo.md
           - viewer.py: reference/main/viewer.md
+      - Seam detector comparison:
+          - make_seam_images.py: reference/report_data/seam_detector_comparison/make_seam_images.md
+          - click_seams.py: reference/report_data/seam_detector_comparison/click_seams.md
+          - compare_seam_angles.py: reference/report_data/seam_detector_comparison/compare_seam_angles.md
       - Old code:
           - new_cricket_ball_tracker.py: reference/main/new_cricket_ball_tracker.md
           - cricket_ball_tracker.py: reference/main/cricket_ball_tracker.md
