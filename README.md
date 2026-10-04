@@ -36,7 +36,6 @@ library/                helper modules used by the programs
     physics_engines/    top-down and side-on physics engines
     automated/          automatic ball detection and seam angle
 output/                 everything the programs write
-test_fixtures/          tests
 report_data/            radar speeds and data for the report
 vids/                   delivery videos
 ```
@@ -46,5 +45,4 @@ Folder locations are set in one place, `library/paths.py`. The tools in `library
 ```sh
 python -m library.camera_calibration
 python -m library.detect_seam_angle_file
-python -m pytest test_fixtures
 ```

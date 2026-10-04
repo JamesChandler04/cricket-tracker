@@ -178,7 +178,7 @@ class CricketBallTracker:
                 self.calibrations[-1][1].append((x, y))
                 print(f"Main diameter point added in frame {self.top_down_video.get_current_frame_number()}: ({x}, {y})")
                 if len(self.calibrations[-1][1]) == 2:
-                    self.calibrations, self.meters_per_pixel = self.calculators._calculate_meters_per_pixel(self.calibrations, self.BALL_DIAMETER_M, self.meters_per_pixel)  # type: ignore[misc]  # real bug: returns None when a calibration pair is unusable, but the result is unpacked
+                    self.calibrations, self.meters_per_pixel = self.calculators._calculate_meters_per_pixel(self.calibrations, self.BALL_DIAMETER_M, self.meters_per_pixel)
                     if len(self.calibrations) >= 2:
                         self.calibration_active = False
                         print("Main second calibration completed.")

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 class Calculators:
     """Calculations on the points clicked in the tracker windows."""
-    def _calculate_meters_per_pixel(self, calibrations: list[Calibration], ball_diameter_m: float, meters_per_pixel: float | None) -> tuple[list[Calibration], float] | None:
+    def _calculate_meters_per_pixel(self, calibrations: list[Calibration], ball_diameter_m: float, meters_per_pixel: float | None) -> tuple[list[Calibration], float]:
         """Return the calibrations and mean m/px, or None if a pair is unusable."""
         if not calibrations or len(calibrations[-1][1]) != 2:
             raise ValueError(f"Invalid number of calibrations points: {len(calibrations[-1][1]) if calibrations else 0}")
@@ -21,10 +21,16 @@ class Calculators:
             (x1, y1), (x2, y2) = points
             pixel_distance = math.hypot(x2 - x1, y2 - y1)
             if pixel_distance < 1.0:
-                raise ValueError(f"Calibration points in frame {frame_num} are too close.")
+                print(f"Calibration points in frame {frame_num} are too close together.")
+                calibrations.pop()
+                continue
             mpp = ball_diameter_m / pixel_distance
             meters_per_pixel_values.append(mpp)
             print(f"Main calibration in frame {frame_num}: 1 px = {mpp:.6f} m")
+
+        if not meters_per_pixel_values:
+            raise ValueError("No valid calibration pairs found; cannot calculate meters per pixel.")
+        
         meters_per_pixel = sum(meters_per_pixel_values) / len(meters_per_pixel_values)
         print(f"Main average meters per pixel: {meters_per_pixel:.6f} m")
         return calibrations, meters_per_pixel
