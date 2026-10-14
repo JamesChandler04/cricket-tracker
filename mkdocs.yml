@@ -2,7 +2,7 @@ site_name: Cricket Ball Tracker
 site_description: Calculating the speed, swing and seam angle of a cricket delivery from two cameras.
 site_author: James Chandler
 
-# report_data/ is kept out of the repository, so its pages are not built.
+# report_data/ holds the scripts behind the thesis results, which are left out of these docs.
 exclude_docs: |
   reference/report_data/
 

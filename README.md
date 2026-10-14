@@ -46,7 +46,7 @@ In the window:
 
 **Run both stages** runs steps 3 and 4 in one go, asking in between for the speed to reconstruct with. The results are saved to the **Save to** folder (`output/demo_delivery` by default) and shown in the Swing, Trajectory, Results and Coordinates tabs.
 
-The delivery videos and calibration files are not in the repository, and neither are the scripts and data behind the results in the thesis.
+The delivery videos, calibration files and recorded data are not in the repository. The scripts in `report_data/` that produced the results in the thesis are, but they need that data to run.
 
 ## Other Tools
 
@@ -70,6 +70,7 @@ library/                modules the programs use
     physics_engines/    top-down and side-on physics engines
     automated/          automatic seam angle detection, and the earlier automatic ball detection
 docs/                   documentation pages for MkDocs
+report_data/            scripts behind the results in the thesis (their data is not included)
 output/                 where results are saved, made when first needed
 ```
 

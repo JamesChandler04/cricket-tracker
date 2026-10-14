@@ -146,7 +146,7 @@ CALIBRATION_FILTER = "Calibration files (*.npz);;All files (*.*)"
 
 def _speed_recorder() -> Callable[[str, list[float]], object] | None:
     """Return record_speeds from report_data/ for the radar speed comparison, or None
-    when report_data/ is not there (it is kept out of the repository)."""
+    when report_data/ is not there."""
     try:
         speed_data = importlib.import_module("report_data.speed_comparison.speed_data")
     except ModuleNotFoundError:

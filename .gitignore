@@ -12,3 +12,5 @@ site/
 !docs/**/*.png
 !docs/**/*.jpg
 report_data/**
+!report_data/**/
+!report_data/**/*.py
