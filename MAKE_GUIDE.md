@@ -1,42 +1,26 @@
 # Make Guide
 
+The Makefile runs the setup, run and documentation commands for you. Its commands are written for Windows, so on macOS or Linux use the commands in the [README](./README.md) instead.
+
 ## Installing Make on Windows
 
-Run the following command or go to [here](https://gnuwin32.sourceforge.net/packages/make.htm) and follow the download instructions.
+Run the following command, then open a new terminal so that `make` is found:
 
 ```
 winget install ezwinports.make
 ```
 
-## Installing Make on MacOS
-
-You can check if you have Homebrew installed by running this command:
-
-```
-brew -v
-```
-
-If the version comes up, you have it installed, if an error is raised, you need to run the following command:
-
-```
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-Then using Homebrew, you can download Make using the following command:
-
-```
-brew install make
-```
-
 ## Using the Makefile
 
-This project includes a `Makefile` to make it easier to run. Here are the list of commands:
+Run these from the project folder:
 
-- `make setup`: Create virtual environment.
-- `make install`: Install required package in virtual environment (only have to do this once per venv).
-- `make run`: Runs the program.
-- `make clean`: Remove virtual environment.
+- `make setup`: Create the virtual environment in `.venv`.
+- `make install`: Install the packages in [requirements.txt](./requirements.txt) into the virtual environment.
+- `make run-gui`: Run the tracker.
+- `make run-text`: Run the old text-based program, kept for reference only.
+- `make docs-install`: Install the packages for the documentation, listed in [requirements-docs.txt](./requirements-docs.txt).
+- `make docs`: Build the documentation into `site/`. Open `site/index.html` to read it.
+- `make docs-serve`: Show the documentation at http://127.0.0.1:8000, rebuilding it when the code changes.
+- `make clean`: Delete the virtual environment.
 
-To setup a new environment, run `make setup` and `make install`.
-While you still have the [.venv](./.venv) folder, you can jsut run `make run` to run the program.
-You only have to rerun `make install` if you update [requirements.txt](./requirements.txt).
+To set up a new environment, run `make setup` and then `make install`, and `make docs-install` if you want the documentation. While you still have the `.venv` folder, `make run-gui` runs the tracker. You only have to rerun `make install` if you update requirements.txt.

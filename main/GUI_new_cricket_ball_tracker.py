@@ -9,7 +9,9 @@ and Coordinates tabs.
 from __future__ import annotations
 
 import builtins
+import importlib
 import sys
+import tempfile
 import threading
 import traceback
 from collections.abc import Callable
@@ -20,9 +22,11 @@ import matplotlib
 
 matplotlib.use("Qt5Agg")
 
+import matplotlib.pyplot as plt
 import numpy as np
-from PyQt5.QtCore import QObject, Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QClipboard, QCloseEvent, QFont, QKeySequence, QPixmap, QResizeEvent
+from PyQt5.QtCore import QObject, QPointF, QRectF, Qt, QThread, pyqtSignal
+from PyQt5.QtGui import (QClipboard, QCloseEvent, QColor, QFont, QIcon, QKeySequence, QPainter,
+                         QPainterPath, QPalette, QPen, QPixmap, QPolygonF, QResizeEvent)
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -30,8 +34,8 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -40,7 +44,9 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
+    QScrollArea,
     QShortcut,
     QSizePolicy,
     QSpinBox,
@@ -69,7 +75,8 @@ from library.detect_seam_angle_file import (ManualSeamAngleDetector, SeamAngleDe
 from library.helpers import Video
 from library.log_bridge import bridge
 from library.manual_tracker import SideOnTracker, TopDownTracker
-from library.physics_engines.side_on_physics_engine import SideOnPhysicsEngine, SwingResult, TrackedPoint
+from library.physics_engines.side_on_physics_engine import (TARGET_DISTANCE_M, SideOnPhysicsEngine, SwingResult,
+                                                            TrackedPoint)
 from library.physics_engines.top_down_physics_engine import SelectionType, TopDownPhysicsEngine
 from library.results import ResultRow, load_coordinates, load_results
 
@@ -136,8 +143,212 @@ VIDEO_FILTER = "Video files (*.mp4 *.avi *.mov *.mkv);;All files (*.*)"
 CALIBRATION_FILTER = "Calibration files (*.npz);;All files (*.*)"
 """File-type filter for the calibration file dialog."""
 
-MONOSPACE = QFont("Menlo" if sys.platform == "darwin" else "Consolas", 10)
+
+def _speed_recorder() -> Callable[[str, list[float]], object] | None:
+    """Return record_speeds from report_data/ for the radar speed comparison, or None
+    when report_data/ is not there (it is kept out of the repository)."""
+    try:
+        speed_data = importlib.import_module("report_data.speed_comparison.speed_data")
+    except ModuleNotFoundError:
+        return None
+    return cast("Callable[[str, list[float]], object]", speed_data.record_speeds)
+
+
+RECORD_SPEEDS = _speed_recorder()
+"""Saves a delivery's per-frame speeds for the radar speed comparison; None without report_data/."""
+
+MONOSPACE = QFont("Menlo" if sys.platform == "darwin" else "Consolas", 9)
 """Fixed-width font for the log and the numbers (Menlo on macOS, Consolas elsewhere)."""
+
+# Colours. Blue marks the top-down camera and orange the side-on camera, as in the
+# report's figures.
+TOP_DOWN_COLOUR = "#2a78d6"
+"""Colour of the top-down camera's step button and results."""
+SIDE_ON_COLOUR = "#eb6834"
+"""Colour of the side-on camera's step button and results."""
+INK = "#1f2328"
+"""Colour of the main text."""
+MUTED = "#57606a"
+"""Colour of captions, units and other secondary text."""
+BACKGROUND = "#f3f4f6"
+"""Colour of the window behind the panels."""
+BALL_RED = "#b3242f"
+"""Colour of the ball in the window icon."""
+
+STYLE_SHEET = """
+QMainWindow, QWidget#central { background: #f3f4f6; }
+QToolTip { background: #1f2328; color: #ffffff; border: none; padding: 5px 7px; }
+
+QFrame#header { background: #ffffff; border-bottom: 1px solid #e1e4e8; }
+QLabel#appTitle { color: #1f2328; font-size: 13pt; font-weight: 600; }
+QLabel#appSubtitle { color: #57606a; }
+QLabel#legend { color: #57606a; padding-left: 12px; }
+
+QFrame#card { background: #ffffff; border: 1px solid #e1e4e8; border-radius: 8px; }
+QLabel#cardTitle { color: #57606a; font-size: 7.5pt; font-weight: 600; padding-bottom: 1px; }
+QLabel#formLabel { color: #57606a; }
+QLabel#muted, QLabel#plotView { color: #8c959f; }
+QLabel#plotView { background: #ffffff; }
+
+QLineEdit, QSpinBox, QDoubleSpinBox {
+    background: #ffffff; border: 1px solid #d0d7de; border-radius: 5px;
+    padding: 3px 6px; selection-background-color: #2a78d6; selection-color: #ffffff;
+}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #2a78d6; }
+QSpinBox, QDoubleSpinBox { padding-right: 22px; }
+QSpinBox::up-button, QDoubleSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border; width: 18px; border: none; border-left: 1px solid #e1e4e8;
+    background: #f6f8fa;
+}
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-position: top right; border-top-right-radius: 5px;
+}
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-position: bottom right; border-top: 1px solid #e1e4e8; border-bottom-right-radius: 5px;
+}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover { background: #eaeef2; }
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow { image: url(%UP_ARROW%); width: 9px; height: 6px; }
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow { image: url(%DOWN_ARROW%); width: 9px; height: 6px; }
+QCheckBox { spacing: 8px; color: #1f2328; }
+
+QPushButton {
+    background: #ffffff; color: #1f2328; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 4px 10px;
+}
+QPushButton:hover { background: #f6f8fa; border-color: #afb8c1; }
+QPushButton:pressed { background: #eaeef2; }
+QPushButton:disabled { color: #a0a7af; background: #f6f8fa; border-color: #e1e4e8; }
+QPushButton#browse { padding: 3px 8px; }
+QPushButton#topDownStep, QPushButton#sideOnStep, QPushButton#bothStep {
+    color: #ffffff; border: none; font-weight: 600; padding: 7px 10px;
+}
+QPushButton#topDownStep { background: #2a78d6; }
+QPushButton#topDownStep:hover { background: #2468bb; }
+QPushButton#topDownStep:pressed { background: #1f5aa1; }
+QPushButton#sideOnStep { background: #eb6834; }
+QPushButton#sideOnStep:hover { background: #d85a29; }
+QPushButton#sideOnStep:pressed { background: #c04f23; }
+QPushButton#bothStep { background: #1f2328; }
+QPushButton#bothStep:hover { background: #32383f; }
+QPushButton#bothStep:pressed { background: #0d1117; }
+QPushButton#topDownStep:disabled, QPushButton#sideOnStep:disabled, QPushButton#bothStep:disabled {
+    background: #d8dde3; color: #ffffff;
+}
+
+QFrame#tile {
+    background: #fbfcfd; border: 1px solid #e1e4e8; border-left: 3px solid #2a78d6;
+    border-radius: 6px;
+}
+QFrame#tile[camera="side"] { border-left-color: #eb6834; }
+QLabel#tileCaption { color: #57606a; font-size: 8pt; }
+QLabel#tileValue { color: #1f2328; font-size: 13pt; font-weight: 600; }
+QLabel#tileDetail { color: #8c959f; font-size: 8pt; }
+
+QTabWidget::pane { background: #ffffff; border: 1px solid #e1e4e8; border-radius: 8px; top: -1px; }
+QTabBar::tab {
+    background: transparent; color: #57606a; border: none; border-bottom: 2px solid transparent;
+    padding: 6px 12px; margin-right: 2px;
+}
+QTabBar::tab:selected { color: #1f2328; border-bottom: 2px solid #2a78d6; font-weight: 600; }
+QTabBar::tab:hover:!selected { color: #1f2328; }
+
+QPlainTextEdit#log { background: #fbfcfd; border: none; padding: 4px; color: #24292f; }
+QTreeWidget, QTableWidget {
+    background: #ffffff; border: 1px solid #e1e4e8; border-radius: 6px;
+    alternate-background-color: #f7f8fa; gridline-color: #eef0f2;
+    selection-background-color: #dbe8fb; selection-color: #1f2328;
+}
+QTreeWidget::item { padding: 1px 0; }
+QHeaderView::section {
+    background: #f6f8fa; color: #57606a; border: none; border-bottom: 1px solid #e1e4e8;
+    padding: 4px 6px; font-weight: 600;
+}
+
+QScrollArea#controlsScroll, QWidget#controls { background: transparent; border: none; }
+QSplitter::handle { background: transparent; }
+QStatusBar { background: #ffffff; border-top: 1px solid #e1e4e8; color: #57606a; }
+QStatusBar::item { border: none; }
+QProgressBar { background: #e9eef5; border: none; border-radius: 3px; max-height: 6px; }
+QProgressBar::chunk { background: #2a78d6; border-radius: 3px; }
+"""
+"""Style sheet for the whole program: white panels on a light grey window, with the
+step buttons and results coloured by camera. %UP_ARROW% and %DOWN_ARROW% stand for the
+spin box arrow images, which apply_theme draws.
+"""
+
+
+def apply_theme(app: QApplication) -> None:
+    """Give the program the same light look on every computer: the Fusion style, a light
+    palette and the style sheet. Text is in the system's usual size (9 pt on Windows).
+    """
+    app.setStyle("Fusion")
+    palette = QPalette()
+    for role, colour in ((QPalette.ColorRole.Window, BACKGROUND), (QPalette.ColorRole.WindowText, INK),
+                         (QPalette.ColorRole.Base, "#ffffff"), (QPalette.ColorRole.AlternateBase, "#f7f8fa"),
+                         (QPalette.ColorRole.Text, INK), (QPalette.ColorRole.Button, "#ffffff"),
+                         (QPalette.ColorRole.ButtonText, INK), (QPalette.ColorRole.Highlight, TOP_DOWN_COLOUR),
+                         (QPalette.ColorRole.HighlightedText, "#ffffff"), (QPalette.ColorRole.ToolTipBase, INK),
+                         (QPalette.ColorRole.ToolTipText, "#ffffff"), (QPalette.ColorRole.PlaceholderText, "#8c959f")):
+        palette.setColor(role, QColor(colour))
+    for role in (QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText, QPalette.ColorRole.WindowText):
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor("#a0a7af"))
+    app.setPalette(palette)
+    up_arrow, down_arrow = _spin_arrow_files()
+    app.setStyleSheet(STYLE_SHEET.replace("%UP_ARROW%", up_arrow).replace("%DOWN_ARROW%", down_arrow))
+
+
+def _spin_arrow_files() -> tuple[str, str]:
+    """Draw the spin boxes' up and down arrows to PNG files, since a style sheet can only
+    take images from files, and return their paths with forward slashes. If they cannot
+    be written, return empty paths and the spin boxes go without arrows.
+    """
+    folder = Path(tempfile.gettempdir()) / "cricket_ball_tracker"
+    corners = {"up": ((4.5, 0.0), (9.0, 6.0), (0.0, 6.0)), "down": ((0.0, 0.0), (9.0, 0.0), (4.5, 6.0))}
+    files = []
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        for name, points in corners.items():
+            pixmap = QPixmap(9, 6)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(MUTED))
+            painter.drawPolygon(QPolygonF([QPointF(x, y) for x, y in points]))
+            painter.end()
+            path = folder / f"spin_{name}.png"
+            if not pixmap.save(str(path)):
+                return "", ""
+            files.append(path.as_posix())
+    except OSError:
+        return "", ""
+    return files[0], files[1]
+
+
+def ball_pixmap(size: int) -> QPixmap:
+    """Draw a red cricket ball with its seam, size px across, for the window icon and the header."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(BALL_RED))
+    margin = size * 0.05
+    painter.drawEllipse(QRectF(margin, margin, size - 2 * margin, size - 2 * margin))
+    # The seam: two rows of stitching curving across the ball.
+    pen = QPen(QColor("#f6e3e3"), max(1.0, size * 0.045))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    for offset in (-0.06, 0.06):
+        seam = QPainterPath()
+        seam.moveTo(size * (0.16 + offset), size * (0.28 - offset))
+        seam.cubicTo(size * (0.42 + offset), size * (0.40 - offset), size * (0.58 + offset),
+                     size * (0.60 - offset), size * (0.84 + offset), size * (0.72 - offset))
+        painter.drawPath(seam)
+    painter.end()
+    return pixmap
 
 
 def resolve_plot_path(save_path: str | Path) -> Path:
@@ -303,8 +514,9 @@ class TaskThread(QThread):
 def track_top_down(display: ScriptedDisplay, save_dir: str, value_file: str,
                    seam_detector: SeamAngleDetector) -> TopDownData:
     """
-    Click the top-down video through and take the velocity from it, then save
-    the ball images and let seam_detector find the seam angle on them.
+    Click the top-down video through and take the velocity from it, saving the
+    per-frame speeds for the radar speed comparison if report_data/ is there,
+    then save the ball images and let seam_detector find the seam angle on them.
     """
     print("The seam angle is picked from the ball images after tracking, "
           "so T (seam mode) is not needed in the top-down window.")
@@ -320,6 +532,8 @@ def track_top_down(display: ScriptedDisplay, save_dir: str, value_file: str,
     velocity, velocities = engine.calculate_velocity(points, fps=fps, type=SelectionType.MEAN)
     print(f"Calculated velocity: {velocity:.2f} km/h")
     print("Per-frame velocities: " + ", ".join(f"{v:.1f}" for v in velocities) + " km/h")
+    if RECORD_SPEEDS is not None:
+        RECORD_SPEEDS(display.main_path, velocities)
 
     # Seam angle step. The crops are taken from the frames the clicks were made
     # on, so they use the same video and the same rotation as the tracker.
@@ -404,9 +618,9 @@ class ImageView(QLabel):
     def __init__(self, placeholder: str) -> None:
         """Set up the view with grey placeholder text until a plot is shown."""
         super().__init__(placeholder)
+        self.setObjectName("plotView")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(1, 1)
-        self.setStyleSheet("color: #888780;")
         self._source: QPixmap | None = None
 
     def set_image(self, path: str | Path) -> None:
@@ -438,8 +652,8 @@ class ElidedLabel(QLabel):
         """Set up an empty grey label whose width does not depend on its text."""
         super().__init__()
         self._full_text = ""
+        self.setObjectName("muted")
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.setStyleSheet("color: #888780;")
 
     def set_full_text(self, text: str) -> None:
         """Set the full text and tooltip, and show as much of the text as fits."""
@@ -458,6 +672,65 @@ class ElidedLabel(QLabel):
                                                    max(self.width(), 1)))
 
 
+class Card(QFrame):
+    """A white panel with a small heading, holding one group of controls."""
+
+    def __init__(self, title: str) -> None:
+        """Set up the panel with its heading; add the controls to body."""
+        super().__init__()
+        self.setObjectName("card")
+        self.body = QVBoxLayout(self)
+        self.body.setContentsMargins(12, 9, 12, 11)
+        self.body.setSpacing(6)
+        heading = QLabel(title.upper())
+        heading.setObjectName("cardTitle")
+        self.body.addWidget(heading)
+
+    def add_form(self) -> QFormLayout:
+        """Add a form for labelled rows of controls to the panel and return it."""
+        form = QFormLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(6)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.body.addLayout(form)
+        return form
+
+
+class MetricTile(QFrame):
+    """One result: a caption, the value in large type with its unit, and a line of detail.
+    The coloured edge shows which camera the result comes from.
+    """
+
+    def __init__(self, caption: str, side_on: bool = False) -> None:
+        """Set up an empty tile, edged in the side-on colour if side_on, else the top-down one."""
+        super().__init__()
+        self.setObjectName("tile")
+        self.setProperty("camera", "side" if side_on else "top")
+        box = QVBoxLayout(self)
+        box.setContentsMargins(8, 5, 8, 6)
+        box.setSpacing(0)
+        self.caption = QLabel(caption)
+        self.caption.setObjectName("tileCaption")
+        self.value = QLabel("-")
+        self.value.setObjectName("tileValue")
+        self.value.setTextFormat(Qt.TextFormat.RichText)
+        self.value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.detail = ElidedLabel()
+        self.detail.setObjectName("tileDetail")
+        for label in (self.caption, self.value, self.detail):
+            box.addWidget(label)
+
+    def show_value(self, value: str, unit: str = "", detail: str = "") -> None:
+        """Show value with its unit in smaller grey type, and the detail line under it."""
+        space = "" if unit == "\u00b0" else "&nbsp;"
+        unit_html = (f'<span style="font-size:9pt; font-weight:400; color:{MUTED}">{space}{unit}</span>'
+                     if unit else "")
+        self.value.setText(f"{value}{unit_html}")
+        self.detail.set_full_text(detail)
+        self.setToolTip(" ".join(part for part in (f"{self.caption.text()}:", value, unit, detail) if part))
+
+
 class MainWindow(QMainWindow):
     """Controls on the left, log and plots on the right."""
 
@@ -466,8 +739,15 @@ class MainWindow(QMainWindow):
         log, and show any results already in the save folder.
         """
         super().__init__()
-        self.setWindowTitle("Cricket ball tracker")
-        self.resize(1360, 860)
+        self.setWindowTitle("Cricket Ball Tracker")
+        self.setWindowIcon(QIcon(ball_pixmap(64)))
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            self.resize(1400, 880)
+        else:
+            # The full size where it fits, or most of a smaller screen.
+            space = screen.availableGeometry()
+            self.resize(min(1400, int(space.width() * 0.92)), min(880, int(space.height() * 0.9)))
 
         self.router = PromptRouter(self)
         self.router.install()
@@ -478,11 +758,31 @@ class MainWindow(QMainWindow):
         self.side_on_data: SideOnData | None = None
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
         splitter.addWidget(self._build_controls())
         splitter.addWidget(self._build_views())
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([400, 960])
-        self.setCentralWidget(splitter)
+        splitter.setSizes([430, 970])
+
+        central = QWidget()
+        central.setObjectName("central")
+        page = QVBoxLayout(central)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.setSpacing(0)
+        page.addWidget(self._build_header())
+        body = QVBoxLayout()
+        body.setContentsMargins(10, 10, 10, 8)
+        body.addWidget(splitter)
+        page.addLayout(body, 1)
+        self.setCentralWidget(central)
+
+        # A moving bar in the status bar while a step runs.
+        self.busy_bar = QProgressBar()
+        self.busy_bar.setRange(0, 0)
+        self.busy_bar.setTextVisible(False)
+        self.busy_bar.setFixedWidth(120)
+        self.busy_bar.hide()
+        cast(QStatusBar, self.statusBar()).addPermanentWidget(self.busy_bar)
 
         sys.stdout = bridge
         bridge.message_received.connect(self.append_log)
@@ -495,106 +795,185 @@ class MainWindow(QMainWindow):
 
     # Build
 
+    def _build_header(self) -> QWidget:
+        """Build the strip across the top: the ball icon, the program's name and the camera colours."""
+        header = QFrame()
+        header.setObjectName("header")
+        box = QHBoxLayout(header)
+        box.setContentsMargins(14, 7, 14, 7)
+        box.setSpacing(10)
+        icon = QLabel()
+        icon.setPixmap(ball_pixmap(30))
+        box.addWidget(icon)
+        titles = QVBoxLayout()
+        titles.setSpacing(0)
+        title = QLabel("Cricket Ball Tracker")
+        title.setObjectName("appTitle")
+        subtitle = QLabel("Speed, seam angle and swing from a top-down and a side-on camera")
+        subtitle.setObjectName("appSubtitle")
+        titles.addWidget(title)
+        titles.addWidget(subtitle)
+        box.addLayout(titles)
+        box.addStretch(1)
+        for text, colour in (("Top-down camera", TOP_DOWN_COLOUR), ("Side-on camera", SIDE_ON_COLOUR)):
+            key = QLabel(f'<span style="color:{colour}; font-size:11pt">&#9679;</span>&nbsp; {text}')
+            key.setObjectName("legend")
+            box.addWidget(key)
+        return header
+
     def _build_controls(self) -> QWidget:
-        """Build the left panel of inputs, step buttons and result readouts."""
+        """Build the left panel: the videos, the settings, the step buttons and the results."""
         panel = QWidget()
+        panel.setObjectName("controls")
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(10)
 
-        inputs = QGroupBox("Inputs")
-        form = QFormLayout(inputs)
-
+        videos = Card("Videos")
+        form = videos.add_form()
         self.top_down_path = QLineEdit()
-        form.addRow("Top-down video", self._with_browse(self.top_down_path,
-                                                        self.browse_top_down))
-        self.top_down_start = QSpinBox()
-        self.top_down_start.setRange(0, 10_000_000)
-        form.addRow("Start frame", self.top_down_start)
-
+        self.top_down_path.setPlaceholderText("Choose the top-down video")
+        form.addRow(self._form_label("Top-down"), self._with_browse(self.top_down_path, self.browse_top_down))
+        self.top_down_start = self._frame_box()
+        form.addRow(self._form_label("Start frame"), self.top_down_start)
         self.side_on_path = QLineEdit()
-        form.addRow("Side-on video", self._with_browse(self.side_on_path,
-                                                       self.browse_side_on))
-        self.side_on_start = QSpinBox()
-        self.side_on_start.setRange(0, 10_000_000)
-        form.addRow("Start frame", self.side_on_start)
+        self.side_on_path.setPlaceholderText("Choose the side-on video")
+        form.addRow(self._form_label("Side-on"), self._with_browse(self.side_on_path, self.browse_side_on))
+        self.side_on_start = self._frame_box()
+        form.addRow(self._form_label("Start frame"), self.side_on_start)
+        layout.addWidget(videos)
 
+        settings = Card("Settings")
+        form = settings.add_form()
         self.calibration_path = QLineEdit(CALIBRATION_PATH)
-        form.addRow("Calibration", self._with_browse(self.calibration_path,
-                                                     self.browse_calibration))
-
+        form.addRow(self._form_label("Calibration"), self._with_browse(self.calibration_path,
+                                                                       self.browse_calibration))
         self.save_dir = QLineEdit(SAVE_DIR)
-        form.addRow("Save to", self._with_browse(self.save_dir, self.browse_save_dir))
-
+        form.addRow(self._form_label("Save to"), self._with_browse(self.save_dir, self.browse_save_dir))
         self.velocity = QDoubleSpinBox()
         self.velocity.setRange(0.0, 250.0)
         self.velocity.setDecimals(2)
         self.velocity.setSuffix(" km/h")
+        self.velocity.setFixedWidth(130)
         self.velocity.setToolTip("Filled in by the top-down stage. Override it here "
                                  "to run the side-on stage on its own.")
-        form.addRow("Delivery speed", self.velocity)
-
+        form.addRow(self._form_label("Delivery speed"), self.velocity)
         self.automatic_seam = QCheckBox("Automatic seam angle detection")
         self.automatic_seam.setToolTip("Ticked: automatic_seam_angle.py finds the seam on "
                                        "the ball images.\nUnticked: click the seam yourself "
                                        "in the seam angle window.")
-        form.addRow("", self.automatic_seam)
-
+        form.addRow(self.automatic_seam)
         self.show_3d = QCheckBox("Open the 3D plot in its own window")
-        form.addRow("", self.show_3d)
-        layout.addWidget(inputs)
+        form.addRow(self.show_3d)
+        layout.addWidget(settings)
 
-        steps = QGroupBox("Steps")
-        buttons = QVBoxLayout(steps)
+        steps = Card("Steps")
+        grid = QGridLayout()
+        grid.setSpacing(6)
         self.calibrate_button = QPushButton("Calibrate camera...")
-        self.top_down_button = QPushButton("1 - Track top-down")
-        self.side_on_button = QPushButton("2 - Track side-on")
-        self.both_button = QPushButton("Run both")
+        self.calibrate_button.setToolTip("Click the 16 ring corners on one side-on frame to "
+                                         "make a new calibration file.")
+        self.top_down_button = QPushButton("1   Track top-down")
+        self.top_down_button.setObjectName("topDownStep")
+        self.top_down_button.setToolTip("Click the ball through the top-down video for the "
+                                        "speed, then measure the seam angle.")
+        self.side_on_button = QPushButton("2   Track side-on")
+        self.side_on_button.setObjectName("sideOnStep")
+        self.side_on_button.setToolTip("Click the ball through the side-on video and "
+                                       "reconstruct its path and swing at the delivery speed.")
+        self.both_button = QPushButton("Run both stages")
+        self.both_button.setObjectName("bothStep")
+        self.both_button.setToolTip("Track top-down, choose the speed to use, then track side-on.")
         self.calibrate_button.clicked.connect(self.start_calibration)
         self.top_down_button.clicked.connect(self.start_top_down)
         self.side_on_button.clicked.connect(self.start_side_on)
         self.both_button.clicked.connect(self.start_both)
-        for button in (self.calibrate_button, self.top_down_button,
-                       self.side_on_button, self.both_button):
-            buttons.addWidget(button)
+        grid.addWidget(self.calibrate_button, 0, 0, 1, 2)
+        grid.addWidget(self.top_down_button, 1, 0)
+        grid.addWidget(self.side_on_button, 1, 1)
+        grid.addWidget(self.both_button, 2, 0, 1, 2)
+        steps.body.addLayout(grid)
         self.step_buttons = (self.calibrate_button, self.top_down_button,
                              self.side_on_button, self.both_button)
         layout.addWidget(steps)
-
-        results = QGroupBox("Results")
-        grid = QGridLayout(results)
-        self.readouts: dict[str, QLabel] = {}
-        rows = ("Velocity", "Seam angle", "Tracked points",
-                "Swing at last point", "Swing at", "Baseline residual",
-                "Projection residual")
-        for row, name in enumerate(rows):
-            grid.addWidget(QLabel(name), row, 0)
-            value = QLabel("-")
-            value.setFont(MONOSPACE)
-            value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            grid.addWidget(value, row, 1)
-            self.readouts[name] = value
-        layout.addWidget(results)
-
         layout.addStretch(1)
-        return panel
+
+        scroll = QScrollArea()
+        scroll.setObjectName("controlsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(panel)
+        # Never narrower than the panel, so the splitter shrinks the plots instead of cutting off controls.
+        scrollbar = scroll.verticalScrollBar()
+        assert scrollbar is not None
+        scroll.setMinimumWidth(panel.minimumSizeHint().width() + scrollbar.sizeHint().width())
+        return scroll
+
+    @staticmethod
+    def _form_label(text: str) -> QLabel:
+        """Return a grey label for a row of a form."""
+        label = QLabel(text)
+        label.setObjectName("formLabel")
+        return label
+
+    @staticmethod
+    def _frame_box() -> QSpinBox:
+        """Return a box for a video's start frame."""
+        box = QSpinBox()
+        box.setRange(0, 10_000_000)
+        box.setFixedWidth(130)
+        return box
 
     @staticmethod
     def _with_browse(line_edit: QLineEdit, handler: Callable[[], None]) -> QWidget:
-        """Return line_edit in a row with a small browse button that calls handler."""
+        """Return line_edit in a row with a Browse button that calls handler."""
         row = QWidget()
         box = QHBoxLayout(row)
         box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(6)
         box.addWidget(line_edit)
-        button = QPushButton("...")
-        button.setFixedWidth(32)
+        button = QPushButton("Browse")
+        button.setObjectName("browse")
         button.clicked.connect(handler)
         box.addWidget(button)
         return row
 
-    def _build_views(self) -> QTabWidget:
-        """Build the Log, Swing, Trajectory, Results and Coordinates tabs."""
+    def _build_views(self) -> QWidget:
+        """Build the right side: a row of result tiles above the Log, Swing, Trajectory,
+        Results and Coordinates tabs.
+        """
+        views = QWidget()
+        column = QVBoxLayout(views)
+        column.setContentsMargins(8, 0, 0, 0)
+        column.setSpacing(10)
+
+        results = Card("Results")
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        self.tiles = {
+            "speed": MetricTile("Delivery speed"),
+            "seam": MetricTile("Seam angle"),
+            "swing": MetricTile("Swing at last point", side_on=True),
+            "projected": MetricTile(f"Swing at {TARGET_DISTANCE_M:.0f} m", side_on=True),
+            "points": MetricTile("Side-on points", side_on=True),
+            "fits": MetricTile("Fit residuals", side_on=True),
+        }
+        # The top-down results down the left, the side-on ones in the two columns to the right.
+        positions = {"speed": (0, 0), "seam": (1, 0), "swing": (0, 1), "projected": (0, 2),
+                     "points": (1, 1), "fits": (1, 2)}
+        for name, (grid_row, grid_column) in positions.items():
+            grid.addWidget(self.tiles[name], grid_row, grid_column)
+        for column_index in range(3):
+            grid.setColumnStretch(column_index, 1)
+        results.body.addLayout(grid)
+        column.addWidget(results)
+
         self.tabs = QTabWidget()
+        column.addWidget(self.tabs, 1)
 
         self.log = QPlainTextEdit()
+        self.log.setObjectName("log")
         self.log.setReadOnly(True)
         self.log.setFont(MONOSPACE)
         self.log.setMaximumBlockCount(10_000)
@@ -607,16 +986,21 @@ class MainWindow(QMainWindow):
         box = QVBoxLayout(trajectory_tab)
         self.trajectory_view = ImageView("The 3D trajectory appears here after the "
                                          "side-on stage.")
-        box.addWidget(self.trajectory_view)
+        box.addWidget(self.trajectory_view, 1)
+        bar = QHBoxLayout()
+        hint = QLabel("In the interactive view, drag to rotate and scroll to zoom.")
+        hint.setObjectName("muted")
+        bar.addWidget(hint, 1)
         self.open_3d_button = QPushButton("Open the interactive 3D view")
         self.open_3d_button.setEnabled(False)
         self.open_3d_button.clicked.connect(self.open_interactive_3d)
-        box.addWidget(self.open_3d_button)
+        bar.addWidget(self.open_3d_button)
+        box.addLayout(bar)
         self.tabs.addTab(trajectory_tab, "Trajectory")
 
         self.tabs.addTab(self._build_results_tab(), "Results")
         self.tabs.addTab(self._build_coordinates_tab(), "Coordinates")
-        return self.tabs
+        return views
 
     def _build_results_tab(self) -> QWidget:
         """The numbers saved in the YAML files of the save folder."""
@@ -772,11 +1156,13 @@ class MainWindow(QMainWindow):
     def _top_down_finished(self, data: TopDownData) -> None:
         """Show the top-down results and any seam warning; set the Delivery speed."""
         self.velocity.setValue(data["velocity"])
-        self.readouts["Velocity"].setText(f"{data['velocity']:.2f} km/h")
+        self.tiles["speed"].show_value(f"{data['velocity']:.2f}", "km/h",
+                                       f"{data['point_count']} top-down points")
         angle = data["seam_angle"]
-        self.readouts["Seam angle"].setText(
-            "-" if angle is None else f"{angle:+.2f} deg ({data['seam_source']})")
-        self.readouts["Tracked points"].setText(str(data["point_count"]))
+        if angle is None:
+            self.tiles["seam"].show_value("-", detail="no seam found")
+        else:
+            self.tiles["seam"].show_value(f"{angle:+.2f}", "\u00b0", data["seam_source"] or "")
         cast(QStatusBar, self.statusBar()).showMessage(f"Top-down done, {data['velocity']:.2f} km/h.")
         self.load_results(Path(data["path"]).parent)
         if data["seam_warning"]:
@@ -803,7 +1189,7 @@ class MainWindow(QMainWindow):
                   self._side_on_finished, "Tracking side-on")
 
     def _side_on_finished(self, data: SideOnData) -> None:
-        """Show the side-on readouts and plots, and reload the saved results."""
+        """Show the side-on results and plots, and reload the saved results."""
         self.side_on_data = data
         self.engine, self.result = data["engine"], data["result"]
         self._show_results(self.result)
@@ -850,17 +1236,16 @@ class MainWindow(QMainWindow):
     # Results
 
     def _show_results(self, result: SwingResult) -> None:
-        """Show the side-on point count, swing and fit residuals in the readouts."""
-        self.readouts["Tracked points"].setText(str(len(result.trajectory.frames)))
-        self.readouts["Swing at last point"].setText(
-            f"{result.swing_at_last_point_cm:+.2f} cm "
-            f"at {result.last_point_distance_m:.2f} m")
-        self.readouts["Swing at"].setText(
-            f"{result.swing_at_17m_cm:+.2f} cm at {result.target_distance_m:.0f} m")
-        self.readouts["Baseline residual"].setText(
-            f"{result.baseline_residual_cm:.2f} cm RMS")
-        self.readouts["Projection residual"].setText(
-            f"{result.projection_residual_cm:.2f} cm RMS")
+        """Show the side-on point count, swing and fit residuals in the result tiles."""
+        frames = result.trajectory.frames
+        self.tiles["points"].show_value(str(len(frames)), detail=f"frames {frames[0]}-{frames[-1]}")
+        self.tiles["swing"].show_value(f"{result.swing_at_last_point_cm:+.2f}", "cm",
+                                       f"at {result.last_point_distance_m:.2f} m")
+        projected = self.tiles["projected"]
+        projected.caption.setText(f"Swing at {result.target_distance_m:.0f} m")
+        projected.show_value(f"{result.swing_at_17m_cm:+.2f}", "cm", "lower bound")
+        self.tiles["fits"].show_value(f"{result.baseline_residual_cm:.2f} / {result.projection_residual_cm:.2f}",
+                                      "cm", "baseline / projection")
 
     def load_results(self, folder: str | Path | None = None) -> None:
         """Fill the Results and Coordinates tabs from the files in folder, or the save folder."""
@@ -952,11 +1337,16 @@ class MainWindow(QMainWindow):
             self.open_interactive_3d()
 
     def open_interactive_3d(self) -> None:
-        """Drag to rotate. The figure has to be built on the GUI thread to do that."""
+        """Drag to rotate. The figure has to be built on the GUI thread to do that.
+
+        In interactive mode show() returns straight away, so the plot opens in its own
+        window beside this one instead of holding up the window in a second event loop.
+        """
         if self.result is None:
             return
         assert self.engine is not None
-        self.engine.plot_trajectory_3d(self.result, show=True)
+        with plt.ion():
+            self.engine.plot_trajectory_3d(self.result, show=True)
 
     # Plumbing
 
@@ -995,9 +1385,12 @@ class MainWindow(QMainWindow):
         self._set_busy(False, "Cancelled.")
 
     def _set_busy(self, busy: bool, message: str) -> None:
-        """Lock or unlock the step buttons and show message in the status bar."""
+        """Lock or unlock the step buttons, show or hide the busy bar, and show message in
+        the status bar.
+        """
         for button in self.step_buttons:
             button.setEnabled(not busy)
+        self.busy_bar.setVisible(busy)
         cast(QStatusBar, self.statusBar()).showMessage(message)
 
     def append_log(self, text: str) -> None:
@@ -1016,7 +1409,16 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     """Open the tracker window and run it until it is closed."""
+    # Scale the whole window with the display's zoom setting, so it stays sharp and in
+    # proportion on high-resolution laptop screens.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    # Qt 5 rounds a 150% display scale up to 200%, which makes everything too big for the
+    # screen; round halves down instead. Text still follows the display's own size.
+    if hasattr(QApplication, "setHighDpiScaleFactorRoundingPolicy"):
+        QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.RoundPreferFloor)
     app = QApplication(sys.argv)
+    apply_theme(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())

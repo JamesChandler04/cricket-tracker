@@ -1,5 +1,6 @@
 """Calibrates the side-on camera: the user clicks the calibration cubes' ring corners in
-one frame, and the camera is solved from them by DLT and saved as an .npz file.
+one frame, and the camera is solved from them by DLT and saved as an .npz file, along with
+the clicked corners and how far the solved camera puts each corner from its click.
 """
 
 from __future__ import annotations
@@ -40,14 +41,14 @@ CORNER_LABELS = ["top_left", "top_right", "bottom_right", "bottom_left"]
 """Names of each ring's four corners, in the order they are clicked."""
 
 
-def resection_camera(
+def ring_corners_m(
     ring_forward_distances_m: Sequence[float],
-    ring_corners_px: Sequence[Sequence[Coord]],
     tunnel_half_width_m: float = 1.5,
     tunnel_half_height_m: float = 1.5,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Recovers the camera's full intrinsics + pose from the ring corners.
-    Returns (K_inv, R_T, t_std) - used directly by pixel_to_xyz.
+) -> np.ndarray:
+    """Return every ring corner in world coordinates, in m, in the order they are clicked
+    (ring by ring, each in CORNER_LABELS order): X to the bowler's right, Y down the pitch
+    and Z downward, from the centre of the first ring.
     """
     corner_list: list[tuple[float, float, float]] = []
     for depth in ring_forward_distances_m:
@@ -57,7 +58,30 @@ def resection_camera(
             (tunnel_half_width_m, depth, tunnel_half_height_m),    # bottom_right
             (-tunnel_half_width_m, depth, tunnel_half_height_m),   # bottom_left
         ]
-    object_points = np.array(corner_list, dtype=np.float64)
+    return np.array(corner_list, dtype=np.float64)
+
+
+def reprojection_errors(K_inv: np.ndarray, R_T: np.ndarray, t_std: np.ndarray,
+                        object_points: np.ndarray, image_points: np.ndarray) -> np.ndarray:
+    """Return how far each world point lands from its clicked pixel when it is projected
+    through the calibration, in px.
+    """
+    camera = object_points @ R_T + t_std  # R @ X + t for every point, as R_T is R transposed
+    projected = camera @ np.linalg.inv(K_inv).T
+    pixels = projected[:, :2] / projected[:, 2:3]
+    return np.asarray(np.linalg.norm(pixels - image_points, axis=1))
+
+
+def resection_camera(
+    ring_forward_distances_m: Sequence[float],
+    ring_corners_px: Sequence[Sequence[Coord]],
+    tunnel_half_width_m: float = 1.5,
+    tunnel_half_height_m: float = 1.5,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Recovers the camera's full intrinsics + pose from the ring corners.
+    Returns (K_inv, R_T, t_std) - used directly by pixel_to_xyz.
+    """
+    object_points = ring_corners_m(ring_forward_distances_m, tunnel_half_width_m, tunnel_half_height_m)
 
     image_points = np.array(
         [(c.x, c.y) for corners in ring_corners_px for c in corners], dtype=np.float64
@@ -83,9 +107,9 @@ def resection_camera(
     return K_inv, R.T, t_std
 
 
-def save_calibration(K_inv: np.ndarray, R_T: np.ndarray, t_std: np.ndarray) -> str:
-    """Ask the user for a folder and file name, save the calibration there with np.savez
-    (which adds .npz if missing) and return that path.
+def save_calibration(K_inv: np.ndarray, R_T: np.ndarray, t_std: np.ndarray, **extras: np.ndarray) -> str:
+    """Ask the user for a folder and file name, save the calibration and any extra arrays
+    there with np.savez (which adds .npz if missing) and return that path.
     """
     dir = input("What folder do you want to save this to? (Hit enter for default)\n")
     name = input("What do you want to call the calibration file? (Hit enter for default)\n")
@@ -98,7 +122,8 @@ def save_calibration(K_inv: np.ndarray, R_T: np.ndarray, t_std: np.ndarray) -> s
     # Hitting enter for the folder saves into the project folder.
     path = (Path(dir) if dir else paths.ROOT) / name
 
-    np.savez(path, K_inv=K_inv, R_T=R_T, t_std=t_std)
+    arrays: dict[str, Any] = {"K_inv": K_inv, "R_T": R_T, "t_std": t_std, **extras}
+    np.savez(path, **arrays)
 
     return path.__str__()
 
@@ -287,7 +312,20 @@ def main(video_path: str) -> None:
                 RING_FORWARD_DISTANCES_M, ring_corners_px,
                 TUNNEL_HALF_WIDTH_M, TUNNEL_HALF_HEIGHT_M,
             )
-            save_path = save_calibration(K_inv, R_T, t_std)
+
+            # Feed the corners back through the solved camera to see how well it fits the clicks.
+            object_points = ring_corners_m(RING_FORWARD_DISTANCES_M, TUNNEL_HALF_WIDTH_M, TUNNEL_HALF_HEIGHT_M)
+            image_points = np.array(points, dtype=np.float64)
+            errors = reprojection_errors(K_inv, R_T, t_std, object_points, image_points)
+            rms = float(np.sqrt(np.mean(errors ** 2)))
+            worst = int(np.argmax(errors))
+            print(f"Reprojection error of the {len(errors)} corners: RMS {rms:.2f} px, largest {errors[worst]:.2f} px "
+                  f"(ring {worst // 4 + 1}, {CORNER_LABELS[worst % 4]})")
+            for i, error in enumerate(errors):
+                print(f"  ring {i // 4 + 1} {CORNER_LABELS[i % 4]:<12} {error:.2f} px")
+
+            save_path = save_calibration(K_inv, R_T, t_std, image_points_px=image_points,
+                                         object_points_m=object_points, reprojection_errors_px=errors)
 
             print(f"Saved calibration matrices to {save_path}")
             break

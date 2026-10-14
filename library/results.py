@@ -149,6 +149,7 @@ def _side_on_section(path: Path) -> ResultSection:
     projection = _mapping(data.get("projection_fit"))
     calibration = _mapping(data.get("calibration"))
     target = swing.get("target_distance_m")
+    drag_coefficient, drag_constant = _drag(delivery)
     rows = [
         ResultRow("Delivery speed used", _speed(delivery.get("speed_km_h"), delivery.get("speed_m_s"))),
         ResultRow("Swing at last tracked point",
@@ -165,7 +166,8 @@ def _side_on_section(path: Path) -> ResultSection:
                         _frames(delivery.get("first_frame"), delivery.get("last_frame")))),
         ResultRow("Duration", _number(delivery.get("duration_s"), "{:.3f} s")),
         ResultRow("Frame rate", _number(delivery.get("fps"), "{:.2f} fps")),
-        ResultRow("Drag coefficient", _number(delivery.get("drag_coefficient"), "{:g}")),
+        ResultRow("Drag coefficient", drag_coefficient),
+        ResultRow("Drag constant", drag_constant),
         ResultRow("Calibration", "", [
             ResultRow("File", str(calibration.get("path", "-"))),
             ResultRow("Focal length", _vector(calibration.get("focal_px"), "{:.1f}", "px")),
@@ -218,6 +220,16 @@ def _speed(km_h: object, m_s: object) -> str:
     speed = _number(km_h, "{:.2f} km/h")
     in_m_s = _number(m_s, "({:.2f} m/s)")
     return speed if in_m_s == "-" else f"{speed} {in_m_s}"
+
+
+def _drag(delivery: dict[str, Any]) -> tuple[str, str]:
+    """Format the drag coefficient C_D and the drag constant k the side-on reconstruction
+    used. Files saved before k was worked out from C_D hold only k, under drag_coefficient.
+    """
+    if "drag_constant_per_m" not in delivery:
+        return "-", _number(delivery.get("drag_coefficient"), "{:.3g} 1/m")
+    return (_number(delivery.get("drag_coefficient"), "{:g}"),
+            _number(delivery.get("drag_constant_per_m"), "{:.3g} 1/m"))
 
 
 def _fit(fit: dict[str, Any], which: str) -> str:

@@ -2,6 +2,10 @@ site_name: Cricket Ball Tracker
 site_description: Calculating the speed, swing and seam angle of a cricket delivery from two cameras.
 site_author: James Chandler
 
+# report_data/ is kept out of the repository, so its pages are not built.
+exclude_docs: |
+  reference/report_data/
+
 theme:
   name: material
   font: false # use system font
@@ -78,17 +82,8 @@ nav:
           - frame_save.py: reference/frame_save.md
           - generate_seam_training_data.py: reference/generate_seam_training_data.md
           - evaluate_seam_detector.py: reference/evaluate_seam_detector.md
-          - make_speed_plot.py: reference/report_data/make_speed_plot.md
-          - side_on_phys_demo.py: reference/main/side_on_phys_demo.md
-          - viewer.py: reference/main/viewer.md
-      - Seam detector comparison:
-          - make_seam_images.py: reference/report_data/seam_detector_comparison/make_seam_images.md
-          - click_seams.py: reference/report_data/seam_detector_comparison/click_seams.md
-          - compare_seam_angles.py: reference/report_data/seam_detector_comparison/compare_seam_angles.md
       - Old code:
           - new_cricket_ball_tracker.py: reference/main/new_cricket_ball_tracker.md
           - cricket_ball_tracker.py: reference/main/cricket_ball_tracker.md
           - automated_cricket_ball_tracker.py: reference/main/automated_cricket_ball_tracker.md
           - automations.py: reference/library/automated/automations.md
-          - builders.py: reference/library/builders.md
-          - exporters.py: reference/library/exporters.md

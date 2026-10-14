@@ -48,13 +48,17 @@ TARGET_DISTANCE_M = 17.0
 """Forward distance at which the projected swing is reported, in m. Well past the
 tracked range, so the swing there is a lower bound, not a measurement.
 """
-DRAG_COEFFICIENT = 0.0092
-"""Quadratic drag coefficient for the forward motion, in 1/m. Sets how tracked time maps
-to forward distance.
+DRAG_COEFFICIENT = 0.59
+"""Drag coefficient of the ball, C_D, with no units. This is the value to set: the drag
+constant k, which sets how tracked time maps to forward distance, is worked out from it
+by drag_constant.
 """
-GRAVITY = 9.81
-"""Gravitational acceleration, in m/s^2. Not used in this module."""
-
+AIR_DENSITY_KG_M3 = 1.2
+"""Density of the air, in kg/m^3."""
+BALL_MASS_KG = 0.156
+"""Mass of the ball, in kg."""
+BALL_DIAMETER_M = 0.072
+"""Diameter of the ball, in m."""
 RING_FORWARD_DISTANCES_M = (0.0, 3.0, 6.0, 9.0)
 """Forward distances of the calibration rings, in m, for the cubes in the 3D plot."""
 CUBE_SIDE_M = 3.0
@@ -74,6 +78,23 @@ POINTS_CSV_NAME = "tracked_points.csv"
 """File name of the per-point coordinates CSV written by save_data_to_files."""
 ANALYSIS_YAML_NAME = "side_on_analysis.yaml"
 """File name of the YAML file with the swing values, fits, calibration and settings."""
+
+
+def drag_constant(drag_coefficient: float) -> float:
+    """Return the quadratic drag constant k, in 1/m, for a drag coefficient C_D.
+
+    k is the constant in the ball's deceleration, dv/dt = -k * v^2. It is
+    rho * C_D * A / (2 * m), with rho the air density, A the ball's cross-section
+    and m its mass.
+    """
+    area_m2 = math.pi * (BALL_DIAMETER_M / 2.0) ** 2
+    return AIR_DENSITY_KG_M3 * drag_coefficient * area_m2 / (2.0 * BALL_MASS_KG)
+
+
+DRAG_CONSTANT_PER_M = drag_constant(DRAG_COEFFICIENT)
+"""Quadratic drag constant k for the forward motion, in 1/m, worked out from
+DRAG_COEFFICIENT: about 0.0092 using a drag coefficient of 0.59, air density of 1.2 kg/m^3, a ball mass of 0.156 kg and a diameter of 0.072 m.
+"""
 
 _BLUE, _ORANGE, _GREEN, _GREY, _INK = '#2a78d6', '#eb6834', '#1baf7a', '#888780', '#111111'
 
@@ -154,7 +175,12 @@ class Trajectory:
     world: np.ndarray
     fps: float
     speed_km_h: float
-    drag: float
+    drag_coefficient: float
+
+    @property
+    def drag_constant_per_m(self) -> float:
+        """Quadratic drag constant k the track was reconstructed with, in 1/m."""
+        return drag_constant(self.drag_coefficient)
 
     @property
     def x(self) -> FloatArray:
@@ -225,14 +251,14 @@ class SideOnPhysicsEngine:
     """
     Swing analysis bound to one side-on calibration and one frame rate.
 
-    The engine holds the calibration, frame rate, drag, fit windows and cube
-    geometry. Delivery speed is passed to reconstruct_trajectory and analyse,
-    since it varies delivery to delivery. Anything held on the engine can still
-    be overridden per call where the signature allows it.
+    The engine holds the calibration, frame rate, drag coefficient, fit windows
+    and cube geometry. Delivery speed is passed to reconstruct_trajectory and
+    analyse, since it varies delivery to delivery. Anything held on the engine
+    can still be overridden per call where the signature allows it.
     """
 
     def __init__(self, calibration: Calibration, fps: float,
-                 drag: float = DRAG_COEFFICIENT,
+                 drag_coefficient: float = DRAG_COEFFICIENT,
                  baseline_points: int = BASELINE_SOURCE_POINT_COUNT,
                  projection_points: int = EXTRAPOLATION_SOURCE_POINT_COUNT,
                  target_distance_m: float = TARGET_DISTANCE_M,
@@ -244,7 +270,7 @@ class SideOnPhysicsEngine:
         """Bind a calibration and a frame rate to the engine."""
         self.calibration = calibration
         self.fps = float(fps)
-        self.drag = float(drag)
+        self.drag_coefficient = float(drag_coefficient)
         self.baseline_points = int(baseline_points)
         self.projection_points = int(projection_points)
         self.target_distance_m = float(target_distance_m)
@@ -260,25 +286,34 @@ class SideOnPhysicsEngine:
         kwargs.setdefault("calibration_path", path)
         return cls(Calibration.load(path), fps, **kwargs)
 
+    @property
+    def drag_constant_per_m(self) -> float:
+        """Quadratic drag constant k, in 1/m, worked out from the engine's drag coefficient."""
+        return drag_constant(self.drag_coefficient)
+
     @staticmethod
-    def forward_distance(t: float, speed_m_s: float, drag: float = DRAG_COEFFICIENT) -> float:
-        """Distance travelled at time t under quadratic drag."""
-        if drag <= 0:
+    def forward_distance(t: float, speed_m_s: float,
+                         drag_constant_per_m: float = DRAG_CONSTANT_PER_M) -> float:
+        """Distance travelled at time t under quadratic drag, with drag constant k in 1/m."""
+        if drag_constant_per_m <= 0:
             return speed_m_s * t
-        return math.log(1.0 + drag * speed_m_s * t) / drag
+        return math.log(1.0 + drag_constant_per_m * speed_m_s * t) / drag_constant_per_m
 
     def reconstruct_trajectory(self, points: Sequence[TrackedPoint], speed_km_h: float,
                                fps: float | None = None,
-                               drag: float | None = None) -> Trajectory:
+                               drag_coefficient: float | None = None) -> Trajectory:
         """
         Pixel track -> 3D world track, at the given delivery speed in km/h.
 
         Each pixel gives only a ray from the camera. The speed-and-drag model
         supplies the forward distance that fixes where along that ray the ball
-        sits. fps and drag fall back to the engine's values.
+        sits, with the drag constant worked out from the drag coefficient. fps and
+        drag_coefficient fall back to the engine's values.
         """
         fps = self.fps if fps is None else float(fps)
-        drag = self.drag if drag is None else float(drag)
+        drag_coefficient = (self.drag_coefficient if drag_coefficient is None
+                            else float(drag_coefficient))
+        k = drag_constant(drag_coefficient)
         speed_km_h = float(speed_km_h)
 
         speed_m_s = speed_km_h / 3.6
@@ -288,7 +323,7 @@ class SideOnPhysicsEngine:
         frames, times, world = [], [], []
         for p in points:
             t = (p.frame - frame0) / fps
-            y = self.forward_distance(t, speed_m_s, drag)
+            y = self.forward_distance(t, speed_m_s, k)
             ray = self.calibration.K_inv @ np.array([p.u, p.v, 1.0])
             scale = (y + row_y @ self.calibration.t_std) / (row_y @ ray)
             world.append(self.calibration.R_T @ (scale * ray - self.calibration.t_std))
@@ -296,7 +331,7 @@ class SideOnPhysicsEngine:
             times.append(t)
 
         return Trajectory(np.asarray(frames), np.asarray(times), np.asarray(world),
-                          float(fps), float(speed_km_h), float(drag))
+                          float(fps), float(speed_km_h), drag_coefficient)
 
     @staticmethod
     def ball_coordinates(trajectory: Trajectory, origin: str = "cubes") -> np.ndarray:
@@ -424,7 +459,7 @@ class SideOnPhysicsEngine:
         return self._gap_cm(target_distance_m, b, p)
 
     def analyse(self, points: Sequence[TrackedPoint], speed_km_h: float,
-                fps: float | None = None, drag: float | None = None,
+                fps: float | None = None, drag_coefficient: float | None = None,
                 baseline_points: int | None = None, projection_points: int | None = None,
                 target_distance_m: float | None = None) -> SwingResult:
         """
@@ -440,7 +475,7 @@ class SideOnPhysicsEngine:
         target_distance_m = (self.target_distance_m if target_distance_m is None
                              else target_distance_m)
 
-        traj = self.reconstruct_trajectory(points, speed_km_h, fps, drag)
+        traj = self.reconstruct_trajectory(points, speed_km_h, fps, drag_coefficient)
 
         b_slope, b_int, b_rms = self.fit_swingless_baseline(traj, baseline_points)
         p_slope, p_int, p_rms = self.fit_projection(traj, projection_points)
@@ -548,7 +583,8 @@ class SideOnPhysicsEngine:
                 "speed_km_h": traj.speed_km_h,
                 "speed_m_s": traj.speed_km_h / 3.6,
                 "duration_s": traj.times_s[-1],
-                "drag_coefficient": traj.drag,
+                "drag_coefficient": traj.drag_coefficient,
+                "drag_constant_per_m": traj.drag_constant_per_m,
             },
             "swing": {
                 "at_last_tracked_point_cm": result.swing_at_last_point_cm,
@@ -583,7 +619,8 @@ class SideOnPhysicsEngine:
             },
             "engine_config": {
                 "fps": self.fps,
-                "drag_coefficient": self.drag,
+                "drag_coefficient": self.drag_coefficient,
+                "drag_constant_per_m": self.drag_constant_per_m,
                 "baseline_source_point_count": self.baseline_points,
                 "extrapolation_source_point_count": self.projection_points,
                 "target_distance_m": self.target_distance_m,

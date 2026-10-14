@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+import numpy.typing as npt
 import os
 import math
 import time
@@ -32,29 +33,57 @@ top_down_tracking_folder = str(paths.TOP_DOWN_TRACKING_DIR)
 side_on_tracking_folder = str(paths.SIDE_ON_TRACKING_DIR)
 """Folder for the side-on detector's debug images and the frames with the ball."""
 
+FloatArray = npt.NDArray[np.float64]
+"""Type of the float64 numpy arrays used in this module's type annotations."""
+
 CONFIG_PATH = str(paths.CONFIG_PATH)
 """Path of config.yml, read for the optional search bounding boxes."""
 
-# Set to 1 to process every frame. Skips frames until ball is found, then backtracks and processes every frame until the last frame with the ball.
+# Set to 1 to process every frame. Skips frames until ball is found, then backtracks and processes every frame until the ball is lost
+# (top-down: missed in TOP_DOWN_MAX_MISSED_FRAMES frames in a row; side-on: missed once).
 TOP_DOWN_FRAME_SKIP = 1
 """Frame step while searching the top-down video for the ball; 1 checks every frame."""
 SIDE_ON_FRAME_SKIP = 1
 """Frame step while searching the side-on video for the ball; 1 checks every frame."""
+TOP_DOWN_MAX_MISSED_FRAMES = 5
+"""Number of frames in a row without the ball, once it has been found, that ends the
+top-down search.
+"""
+
+# Checks on one delivery's detections as a whole (check_track): the ball crosses the
+# top-down view in a straight line, moving the same way at a steady speed.
+TOP_DOWN_LINE_TOLERANCE = 0.6
+"""Largest distance a detection's centre may lie from the ball's line, as a fraction of
+the ball's radius. If it is further off then it is removed as a false detection.
+"""
+TOP_DOWN_STEP_TOLERANCE = 0.3
+"""Largest fraction a detection's step from its neighbours, per frame, may differ from
+the rest of the track's typical step before it is removed.
+"""
+TOP_DOWN_MIN_TRACK_DETECTIONS = 3
+"""Fewest detections check_track needs to check them against each other. If there are,
+fewer then they are all kept.
+"""
 
 # Ball size (radius in pixels)
 TOP_DOWN_BALL_RADIUS = 69
-"""Expected top-down ball radius, in px; a locked-on ball measured 138 px across."""
+"""Expected top-down ball radius, in px."""
 SIDE_ON_BALL_RADIUS  = 30
 """Expected side-on ball radius at full resolution, in px."""
 
-TOP_DOWN_MAX_DIFFERENCE = 15
+CURCULARITY_THRESHOLD = 0.45
+"""How circular a candidate must be to be accepted as the ball, in 0-1. Smaller is stricter."""
+FILL_RATIO_THRESHOLD = 0.55
+"""Minimum fill ratio of a candidate to be accepted as the ball, in 0-1. Smaller is stricter."""
+
+TOP_DOWN_MAX_DIFFERENCE = 25
 """How far a top-down candidate's radius may be from TOP_DOWN_BALL_RADIUS, in px, in
 both the Hough and contour paths. Smaller is stricter.
 """
 TOP_DOWN_MIN_RADIUS = TOP_DOWN_BALL_RADIUS - TOP_DOWN_MAX_DIFFERENCE
-"""Smallest top-down ball radius accepted, in px (54)."""
+"""Smallest top-down ball radius accepted, in px."""
 TOP_DOWN_MAX_RADIUS = TOP_DOWN_BALL_RADIUS + TOP_DOWN_MAX_DIFFERENCE
-"""Largest top-down ball radius accepted, in px (84)."""
+"""Largest top-down ball radius accepted, in px."""
 
 DETECTION_CIRCLE_THICKNESS = 4
 """Line thickness of the circle drawn round the found ball on debug images, in px."""
@@ -116,6 +145,136 @@ def _apply_bounding_box(frame: MatLike, background_frame: MatLike, bbox: tuple[i
     ye = max(ys + 1, min(ye, h))
     return frame[ys:ye, xs:xe], background_frame[ys:ye, xs:xe], xs, ys
 
+
+@dataclass
+class TrackCheck:
+    """Which of one delivery's detections check_track kept, and why it removed the rest."""
+
+    kept: list[int]
+    """Indices of the detections kept, in frame order."""
+    removed: dict[int, str]
+    """Reason each removed detection was removed, by its index."""
+
+
+def check_track(detections: list[tuple[int, float, float, float]]) -> TrackCheck:
+    """Check one delivery's top-down detections, given as (frame, centre x, centre y,
+    radius) in px, against each other, and return which to keep.
+
+    A detection is removed if its centre is more than TOP_DOWN_LINE_TOLERANCE of a radius
+    from the straight line most of the detections lie on, if it is out of order along
+    that line, or if its step from its neighbours per frame differs from the rest of the
+    track's by more than TOP_DOWN_STEP_TOLERANCE. With fewer than
+    TOP_DOWN_MIN_TRACK_DETECTIONS detections, all are kept.
+    """
+    count = len(detections)
+    if count < TOP_DOWN_MIN_TRACK_DETECTIONS:
+        return TrackCheck(list(range(count)), {})
+    frames = np.array([d[0] for d in detections], dtype=np.float64)
+    points = np.array([(d[1], d[2]) for d in detections], dtype=np.float64)
+    limit = TOP_DOWN_LINE_TOLERANCE * float(np.median([d[3] for d in detections]))
+    removed: dict[int, str] = {}
+
+    # The line: the one through two of the detections that the most others lie close to,
+    # then refitted to all that lie close to it.
+    on_line = np.zeros(count, dtype=bool)
+    best_score = (-1, 0.0)
+    for first in range(count):
+        for second in range(first + 1, count):
+            distances = np.abs(_distances_from_line(points, points[first], points[second] - points[first]))
+            close = distances <= limit
+            score = (int(close.sum()), -float(distances[close].sum()))
+            if score > best_score:
+                best_score, on_line = score, close
+    for _ in range(3):
+        centre, direction = _fitted_line(points[on_line])
+        distances = _distances_from_line(points, centre, direction)
+        refitted = np.abs(distances) <= limit
+        if np.array_equal(refitted, on_line) or refitted.sum() < 2:
+            break
+        on_line = refitted
+    for off_line in np.flatnonzero(~on_line):
+        removed[int(off_line)] = f"{abs(distances[off_line]):.0f} px off the ball's line (limit {limit:.0f} px)"
+
+    # Order: the ball moves one way along the line, so the longest run of detections
+    # that moves steadily forward frame by frame is kept.
+    along = (points - centre) @ direction
+    candidates = [int(i) for i in np.flatnonzero(on_line)]
+    candidates.sort(key=lambda i: frames[i])
+    if len(candidates) >= 2 and np.corrcoef(frames[candidates], along[candidates])[0, 1] < 0:
+        along = -along
+    in_order = _longest_forward_run(candidates, along)
+    for index in candidates:
+        if index not in in_order:
+            removed[index] = "out of order along the ball's line"
+
+    # Steps: while a step per frame between neighbouring detections is too far from the
+    # track's typical step, remove the detection that leaves the most even track.
+    kept = in_order
+    while len(kept) >= TOP_DOWN_MIN_TRACK_DETECTIONS and _unevenness(kept, frames, points) > TOP_DOWN_STEP_TOLERANCE:
+        options = [kept[:position] + kept[position + 1:] for position in range(len(kept))]
+        best = min(range(len(kept)), key=lambda position: _unevenness(options[position], frames, points))
+        worst = kept[best]
+        typical = float(np.median(_steps(options[best], frames, points)))
+        neighbours = kept[max(best - 1, 0):best + 2]
+        change = max(abs(step / typical - 1.0) for step in _steps(neighbours, frames, points))
+        removed[worst] = (f"its step from its neighbours is {change:.0%} off the rest of the track's "
+                          f"(limit {TOP_DOWN_STEP_TOLERANCE:.0%})")
+        kept = options[best]
+    return TrackCheck(kept, removed)
+
+
+def _distances_from_line(points: FloatArray, centre: FloatArray, direction: FloatArray) -> FloatArray:
+    """Return each point's signed distance from the line through centre along direction, in px."""
+    unit = direction / np.linalg.norm(direction)
+    offsets = points - centre
+    return np.asarray(offsets[:, 1] * unit[0] - offsets[:, 0] * unit[1], dtype=np.float64)
+
+
+def _fitted_line(points: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Return the centre and unit direction of the straight line closest to the points."""
+    centre = points.mean(axis=0)
+    _, _, axes = np.linalg.svd(points - centre)
+    return np.asarray(centre, dtype=np.float64), np.asarray(axes[0], dtype=np.float64)
+
+
+def _longest_forward_run(indices: list[int], along: FloatArray) -> list[int]:
+    """Return the longest run of indices, in the order given, whose positions along the
+    line keep increasing.
+    """
+    best: list[list[int]] = []
+    for position, index in enumerate(indices):
+        run = [index]
+        for earlier in range(position):
+            if along[indices[earlier]] < along[index] and len(best[earlier]) + 1 > len(run):
+                run = best[earlier] + [index]
+        best.append(run)
+    return max(best, key=len) if best else []
+
+
+def _unevenness(indices: list[int], frames: FloatArray, points: FloatArray) -> float:
+    """Return how far the step per frame between neighbouring detections strays from the
+    track's typical (median) step at most, as a fraction of it; 0 for one step or none.
+    """
+    steps = _steps(indices, frames, points)
+    if len(steps) < 2:
+        return 0.0
+    typical = float(np.median(steps))
+    return max(abs(step / typical - 1.0) for step in steps)
+
+
+def _track_point(point: TopDownBallDataPoint) -> tuple[int, float, float, float]:
+    """Return a found ball as (frame, centre x, centre y, radius) in px, for check_track."""
+    data = point.data
+    assert data.centre is not None and data.top_left is not None and data.bottom_right is not None
+    return point.frame_number, data.centre.x, data.centre.y, (data.bottom_right.x - data.top_left.x) / 2
+
+
+def _steps(indices: list[int], frames: FloatArray, points: FloatArray) -> list[float]:
+    """Return the distance moved per frame between each detection and the next, in px."""
+    return [float(np.linalg.norm(points[b] - points[a]) / (frames[b] - frames[a]))
+            for a, b in zip(indices, indices[1:])]
+
+
 class BallPosition(Enum):
     """Stage of a video scan: ball not found yet, found, or lost again."""
     BEFORE_FRAME = 0
@@ -127,9 +286,45 @@ class BallPosition(Enum):
 
 class TopDownBallFinder:
     """Automatic finder for the ball and its seam in the top-down video."""
+
+    ball_found: bool
+    """Whether track_ball has found the ball since the search started."""
+    missed_in_a_row: int
+    """Frames in a row track_ball has not found the ball in since it last found it."""
+
+    def __init__(self) -> None:
+        """Set up a finder that has not found the ball yet."""
+        self.reset()
+
+    def reset(self) -> None:
+        """Start a new search: the ball not found yet and no frames missed."""
+        self.ball_found = False
+        self.missed_in_a_row = 0
+
+    @property
+    def ball_lost(self) -> bool:
+        """Return whether the ball has been found and then missed in
+        TOP_DOWN_MAX_MISSED_FRAMES frames in a row, which ends the search.
+        """
+        return self.ball_found and self.missed_in_a_row >= TOP_DOWN_MAX_MISSED_FRAMES
+
+    def track_ball(self, frame: MatLike | None, background_frame: MatLike | None) -> Optional[TopDownBallData]:
+        """Find the ball in the next frame of a search with find_ball, keeping count of the
+        frames in a row it has been missed in since it was found, for ball_lost.
+        """
+        ball_data = self.find_ball(frame, background_frame)
+        if ball_data is not None:
+            self.ball_found = True
+            self.missed_in_a_row = 0
+        elif self.ball_found:
+            self.missed_in_a_row += 1
+        return ball_data
+
     def get_ball_data(self, video: Video) -> list[TopDownBallDataPoint]:
         """Scan the video from its current frame and return the ball and seam in each
-        frame until the ball is lost, saving those frames as images.
+        frame it is found in, until it has been missed in TOP_DOWN_MAX_MISSED_FRAMES
+        frames in a row, saving those frames as images. Detections that do not fit the
+        ball's track (check_track) are left out.
         """
         ball_data_points: list[TopDownBallDataPoint] = []
 
@@ -149,15 +344,14 @@ class TopDownBallFinder:
                 break
             #print(f"No ball found in frame {video.current_frame}, skipping {TOP_DOWN_FRAME_SKIP - 1} frames.")
 
-        ball_position = BallPosition.BEFORE_FRAME
-
-        # Process every frame until ball is no longer found, then stop alltogether.
-        while ball_position is not BallPosition.AFTER_FRAME and video.get_current_frame_number() < video.total_frames - 1:
+        # Process every frame until the ball has been missed in TOP_DOWN_MAX_MISSED_FRAMES frames in a row, then stop alltogether.
+        self.reset()
+        while not self.ball_lost and video.get_current_frame_number() < video.total_frames - 1:
             st = time.time()
             background_frame = video.get_current_frame()
             video.change_frame(1)
             current_frame = video.get_current_frame()
-            ball_data = self.find_ball(current_frame, background_frame)
+            ball_data = self.track_ball(current_frame, background_frame)
             if ball_data:
                 assert current_frame is not None
                 ball_data = self.find_seam(ball_data, current_frame)
@@ -165,14 +359,16 @@ class TopDownBallFinder:
                 ball_data_points.append(TopDownBallDataPoint(frame_number=video.current_frame, data=ball_data))
                 assert current_frame is not None
                 cv2.imwrite(f"{top_down_tracking_folder}/frame_{video.current_frame:04d}.jpg", current_frame)
-                ball_position = BallPosition.IN_FRAME
-            else:
-                if ball_position == BallPosition.IN_FRAME:
-                    ball_position = BallPosition.AFTER_FRAME
-                    #print(f"Ball lost after frame {video.current_frame}, stopping processing.")
+            #if self.ball_lost:
+            #    print(f"Ball lost after frame {video.current_frame}, stopping processing.")
             et = time.time()
             #print(f"Top Down Frame {video.current_frame} ({(et - st)*1000:.2f}ms): {ball_data}")
         
+        check = check_track([_track_point(point) for point in ball_data_points])
+        for index, reason in sorted(check.removed.items()):
+            print(f"Ball found in frame {ball_data_points[index].frame_number} left out: {reason}")
+        ball_data_points = [ball_data_points[index] for index in check.kept]
+
         for point in ball_data_points:
             print(point)
 
@@ -218,7 +414,6 @@ class TopDownBallFinder:
         combined_mask = cv2.bitwise_and(motion_mask, color_mask)
 
         h, w = frame.shape[:2]
-        combined_mask[int(h * 0.75):, :] = 0
 
         # The tight maroon range excludes the bright white seam, leaving a gap
         # across the middle of the ball. A wide close (sized to the seam band)
@@ -282,13 +477,13 @@ class TopDownBallFinder:
                 if perimeter <= 0:
                     continue
                 circularity = 4 * np.pi * area / (perimeter * perimeter)
-                if circularity < 0.45:
+                if circularity < CURCULARITY_THRESHOLD:
                     continue
                 mask = np.zeros_like(combined_mask)
                 cv2.drawContours(mask, [cnt], -1, 255, -1)
                 overlap = cv2.countNonZero(cv2.bitwise_and(mask, combined_mask))
                 fill_ratio = overlap / area
-                if fill_ratio < 0.55:
+                if fill_ratio < FILL_RATIO_THRESHOLD:
                     continue
                 # Skin reject: the ball is vividly saturated, skin is pale.
                 if np.median(hsv[:, :, 1][cv2.bitwise_and(mask, combined_mask) > 0]) < TOP_DOWN_MIN_MEDIAN_SAT:

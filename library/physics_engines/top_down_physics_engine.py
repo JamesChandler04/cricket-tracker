@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import math
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from enum import Enum
 import yaml
@@ -19,6 +17,7 @@ from pathlib import Path
 from library import paths
 from library.helpers import (Coord, SideOnBallData, SideOnBallDataPoint, TopDownBallData,
                              TopDownBallDataPoint)
+from library.physics_engines.side_on_physics_engine import DRAG_COEFFICIENT, drag_constant
 
 SAVE_DIRECTORY = str(paths.DELIVERY_DIR)
 """Default folder for one delivery's results, as a string; not used in this module."""
@@ -31,16 +30,17 @@ FRAMES_FIT_SEAMLESS = 15
 lateral and vertical speeds.
 """
 
-# Lateral drag coefficient, per metre - fitted from a known-swingless reference
-# delivery. Same physical idea as the forward drag_coefficient, applied to the
+# Lateral drag constant, per metre - fitted from a known-swingless reference
+# delivery. Same physical idea as the forward drag constant k, applied to the
 # lateral component instead. Note: validated to fit well within the reference
 # ball's FIRST FRAMES_FIT_SEAMLESS frames, but the reference ball's own later
 # (held-out) frames show non-monotonic behaviour this model can't represent -
 # see calculate_relative_swing_bestfit for an alternative that doesn't assume
 # this functional form at all.
 LATERAL_DRAG_COEFFICIENT = 24.377
-"""Quadratic drag coefficient for the lateral motion in the swingless model, in 1/m,
-fitted from the swingless reference delivery.
+"""Quadratic drag constant for the lateral motion in the swingless model, in 1/m. It is
+fitted from the swingless reference delivery, not worked out from a drag coefficient
+like the forward one.
 """
 
 # ---------------------------------------------------------------------------
@@ -52,8 +52,10 @@ REFERENCE_FPS = 119.88
 """Frame rate of the swingless reference delivery's side-on video, in fps."""
 REFERENCE_INITIAL_SPEED_KMH = 107
 """Speed of the swingless reference delivery, in km/h."""
-REFERENCE_DRAG_COEFFICIENT = 0.0092
-"""Forward drag coefficient for the swingless reference delivery, in 1/m."""
+REFERENCE_DRAG_COEFFICIENT = DRAG_COEFFICIENT
+"""Drag coefficient C_D of the swingless reference delivery's ball, with no units: the
+side-on engine's DRAG_COEFFICIENT.
+"""
 REFERENCE_CALIBRATION_PATH = str(paths.REFERENCE_CALIBRATION_PATH)
 """Path of the side-on camera calibration for the swingless reference delivery."""
 
@@ -184,14 +186,16 @@ class SideOnPhysicsEngine:
         num_rings = num_cubes + 1
         return [release_to_first_ring_m + i * cube_edge_m for i in range(num_rings)]
 
-    def forward_distance_at_time(self, elapsed_s: float, initial_speed_m_s: float, drag_coefficient: float = 0.0092) -> float:
+    def forward_distance_at_time(self, elapsed_s: float, initial_speed_m_s: float, drag_coefficient: float = DRAG_COEFFICIENT) -> float:
         '''
         Forward distance travelled at time elapsed_s, given quadratic air-resistance
-        deceleration (dv/dt = -drag_coefficient * v^2).
+        deceleration (dv/dt = -k * v^2), with the drag constant k worked out from the
+        drag coefficient C_D.
         '''
-        if drag_coefficient <= 0:
+        k = drag_constant(drag_coefficient)
+        if k <= 0:
             return initial_speed_m_s * elapsed_s
-        return math.log(1 + drag_coefficient * initial_speed_m_s * elapsed_s) / drag_coefficient
+        return math.log(1 + k * initial_speed_m_s * elapsed_s) / k
 
     def lateral_distance_at_time(self, elapsed_s: float, initial_lateral_speed_m_s: float, lateral_drag_coefficient: float = LATERAL_DRAG_COEFFICIENT) -> float:
         '''
@@ -235,7 +239,7 @@ class SideOnPhysicsEngine:
         K_inv: np.ndarray,
         R_T: np.ndarray,
         t_std: np.ndarray,
-        drag_coefficient: float = 0.0092,
+        drag_coefficient: float = DRAG_COEFFICIENT,
     ) -> list[list[float]]:
         '''
         Converts tracked side-on pixel points into [x, y, z] coordinates in
@@ -270,7 +274,7 @@ class SideOnPhysicsEngine:
         K_inv: np.ndarray,
         R_T: np.ndarray,
         t_std: np.ndarray,
-        drag_coefficient: float = 0.0092,
+        drag_coefficient: float = DRAG_COEFFICIENT,
         max_forward_distance_m: float = 17.0,
     ) -> list[list[float]]:
         '''
@@ -318,7 +322,7 @@ class SideOnPhysicsEngine:
         K_inv: np.ndarray,
         R_T: np.ndarray,
         t_std: np.ndarray,
-        drag_coefficient: float = 0.0092,
+        drag_coefficient: float = DRAG_COEFFICIENT,
         max_forward_distance_m: float = 17.0,
         linear_fit_points: int = 10,
     ) -> tuple[list[list[float]], list[list[float]]]:
@@ -362,7 +366,7 @@ class SideOnPhysicsEngine:
         K_inv: np.ndarray,
         R_T: np.ndarray,
         t_std: np.ndarray,
-        drag_coefficient: float = 0.0092,
+        drag_coefficient: float = DRAG_COEFFICIENT,
         max_forward_distance_m: float = 17.0,
     ) -> list[list[float]]:
         '''
@@ -400,7 +404,7 @@ class SideOnPhysicsEngine:
         K_inv: np.ndarray,
         R_T: np.ndarray,
         t_std: np.ndarray,
-        drag_coefficient: float = 0.0092,
+        drag_coefficient: float = DRAG_COEFFICIENT,
         max_forward_distance_m: float = 17.0,
         linear_fit_points: int = 10,
     ) -> tuple[list[list[float]], list[list[float]]]:
@@ -451,7 +455,7 @@ class SideOnPhysicsEngine:
         K_inv: np.ndarray,
         R_T: np.ndarray,
         t_std: np.ndarray,
-        drag_coefficient: float = 0.0092,
+        drag_coefficient: float = DRAG_COEFFICIENT,
         max_forward_distance_m: float = 17.0,
         save_path: str = str(paths.OUTPUT_DIR / "relative_swing_analysis.png"),
     ) -> str:
@@ -515,7 +519,7 @@ class SideOnPhysicsEngine:
         K_inv: np.ndarray,
         R_T: np.ndarray,
         t_std: np.ndarray,
-        drag_coefficient: float = 0.0092,
+        drag_coefficient: float = DRAG_COEFFICIENT,
         max_forward_distance_m: float = 17.0,
         linear_fit_points: int = 10,
         save_path: str = str(paths.OUTPUT_DIR / "relative_swing_bestfit_analysis.png"),

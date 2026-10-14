@@ -11,3 +11,5 @@ __pycache__
 site/
 !docs/**/*.png
 !docs/**/*.jpg
+
+#report_data/**
