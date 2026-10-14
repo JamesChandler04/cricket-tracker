@@ -1222,7 +1222,7 @@ class MainWindow(QMainWindow):
             side_on = track_side_on(display, speed, calibration, save_dir)
             return {"top_down": top_down, "side_on": side_on, "velocity": speed}
 
-        # The prompt above carries the measured speed as its default.
+        # The prompt above shows the measured speed; the speed to use is typed in.
         router.clear_script()
         self._run(both, self._both_finished, "Running both stages")
 

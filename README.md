@@ -1,8 +1,10 @@
 # Automatic Cricket Ball Tracker
 
-Measures a cricket delivery's speed, seam angle and swing from two videos: a top-down camera looking down on the pitch and a side-on camera behind the bowler. It was developed on Windows with Python 3.13.
+Measures a cricket delivery's speed, seam angle and swing from two videos: a top-down camera looking down on the pitch and a side-on camera behind the bowler.
 
 ## Installation
+
+It needs Python 3.10 or newer, and was developed on Windows with Python 3.13. Check yours with `python --version`.
 
 Clone the repo and go into its folder:
 
@@ -11,7 +13,7 @@ git clone https://github.com/JamesChandler04/cricket-tracker.git
 cd cricket-tracker
 ```
 
-On Windows with make installed, `make setup` and then `make install` create a virtual environment in `.venv` and install the packages. The [make guide](./MAKE_GUIDE.md) shows how to install make and lists the other commands.
+On Windows with make installed, `make setup` and then `make install` create a virtual environment in `.venv` and install the packages. `make setup` uses the `python` on your PATH. The [make guide](./MAKE_GUIDE.md) shows how to install make and lists the other commands.
 
 Without make, create the virtual environment and install the packages in [requirements.txt](./requirements.txt) yourself:
 
@@ -22,6 +24,8 @@ pip install -r requirements.txt
 ```
 
 On macOS or Linux, activate it with `source .venv/bin/activate` instead.
+
+If `python` is older than 3.10, create the environment with a newer Python instead, for example `py -3.13 -m venv .venv` on Windows, then carry on with `make install` or the steps above.
 
 ## Running the Tracker
 

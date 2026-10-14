@@ -61,8 +61,8 @@ TOP_DOWN_STEP_TOLERANCE = 0.3
 the rest of the track's typical step before it is removed.
 """
 TOP_DOWN_MIN_TRACK_DETECTIONS = 3
-"""Fewest detections check_track needs to check them against each other. If there are,
-fewer then they are all kept.
+"""Fewest detections check_track needs to check them against each other. With fewer,
+they are all kept.
 """
 
 # Ball size (radius in pixels)
@@ -72,9 +72,9 @@ SIDE_ON_BALL_RADIUS  = 30
 """Expected side-on ball radius at full resolution, in px."""
 
 CURCULARITY_THRESHOLD = 0.45
-"""How circular a candidate must be to be accepted as the ball, in 0-1. Smaller is stricter."""
+"""How circular a candidate must be to be accepted as the ball, in 0-1. Larger is stricter."""
 FILL_RATIO_THRESHOLD = 0.55
-"""Minimum fill ratio of a candidate to be accepted as the ball, in 0-1. Smaller is stricter."""
+"""Minimum fill ratio of a candidate to be accepted as the ball, in 0-1. Larger is stricter."""
 
 TOP_DOWN_MAX_DIFFERENCE = 25
 """How far a top-down candidate's radius may be from TOP_DOWN_BALL_RADIUS, in px, in

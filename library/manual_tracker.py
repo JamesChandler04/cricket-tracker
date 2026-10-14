@@ -97,7 +97,7 @@ class TopDownTracker:
     
 
     def run(self) -> None:
-        """Show the top-down video and handle keys and clicks until S is clicked. Q or Esc
+        """Show the top-down video and handle keys and clicks until S is pressed. Q or Esc
         ends the whole program.
         """
         self.top_down_video = self.display.load_main_video()
@@ -110,12 +110,9 @@ class TopDownTracker:
         print("- C: Start/Stop Calibration Mode (click two points across ball diameter, repeat in another frame)")
         print("- SPACE: Start/Stop Ball Tracking Mode (after both calibrations)")
         print("- T: Start/Stop Seam Angle Tracking Mode (after both calibrations)")
-        print("- A/D or ←/→: Move frame back/forward")
+        print("- a/d or A/D: Move frame back/forward (capitals for 10 frame jumps)")
         print("- Click: Mark calibration points, ball position, or seam points")
-        print("- F: Find ball in current frame")
-        print("- B: Set current frame to background frame (for ball finding)")
         print("- S: Proceed to side view tracking")
-        print("- R: Reset tracking and calibration")
         print("- Q or ESC: Quit")
         print("- O: Rotate video 90 degrees clockwise")
 
@@ -422,7 +419,7 @@ class SideOnTracker:
         print("- a/d or A/D: Move frame back/forward (capitals for 10 frame jumps)")
         print("- Click: Mark calibration points or ball position (X, Z)")
         print(f"- Z: Toggle {ZOOM_FACTOR}x zoom centred on the mouse (press again to zoom out)")
-        print("- S: Save data to Excel")
+        print("- S: Finish side view tracking")
         print("- R: Reset side view tracking and calibration")
         print("- Q or ESC: Quit")
         print("- O: Rotate video 90 degrees clockwise")
@@ -454,7 +451,7 @@ class SideOnTracker:
             self.drawers.draw_text(frame, f"Focal Length: {'{:.2f} px'.format(self.side_focal_length_px) if self.side_focal_length_px is not None else 'Not set'}", (10, 170), font_scale=0.9)
             zoom_status = f"{ZOOM_FACTOR}x @ ({self.side_zoom_centre[0]}, {self.side_zoom_centre[1]})" if self.side_zoom_active and self.side_zoom_centre is not None else "Off"
             self.drawers.draw_text(frame, f"Zoom: {zoom_status}  (Z to toggle at mouse)", (10, 200), font_scale=0.9)
-            self.drawers.draw_text(frame, "S = Save Excel", (10, 230), font_scale=0.9)
+            self.drawers.draw_text(frame, "S = Finish Tracking", (10, 230), font_scale=0.9)
 
             cv2.imshow(self.window_name_side, frame)
             key_code = int(cv2.waitKey(10) & 0xFF)
